@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Go Studio Prototype</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: rgba(26, 31, 39, 0.92);
+      --panel-soft: rgba(31, 37, 46, 0.82);
+      --text: #eef2f7;
+      --muted: #9ba7b8;
+      --accent: #6fd3ff;
+      --accent-2: #8ef2c1;
+      --danger: #ff8d8d;
+      --board-wood-1: #d8b06f;
+      --board-wood-2: #bf8b48;
+      --board-line: rgba(44, 26, 10, 0.9);
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(111, 211, 255, 0.12), transparent 32%),
+        radial-gradient(circle at top right, rgba(142, 242, 193, 0.08), transparent 25%),
+        linear-gradient(180deg, #10131a 0%, #090b0f 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .shell {
+      width: min(1500px, calc(100vw - 28px));
+      margin: 18px auto;
+      display: grid;
+      grid-template-columns: 360px 1fr 320px;
+      gap: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+
+    .sidebar, .rightbar {
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 780px;
+    }
+
+    .center {
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      min-height: 780px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+    h1 {
+      font-size: 1.65rem;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }
+    .subtitle {
+      color: var(--muted);
+      margin-top: 6px;
+      font-size: 0.95rem;
+      line-height: 1.45;
+    }
+
+    .section {
+      background: var(--panel-soft);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 18px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .section h3 {
+      font-size: 0.98rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 0.84rem;
+      color: var(--muted);
+    }
+
+    select, input, button, textarea {
+      font: inherit;
+    }
+
+    select, input[type="number"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(12, 14, 18, 0.65);
+      color: var(--text);
+      outline: none;
+    }
+
+    .btn-row, .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .btn-row.two { grid-template-columns: 1fr 1fr; }
+    .btn-row.three { grid-template-columns: repeat(3, 1fr); }
+
+    button {
+      border: 0;
+      border-radius: 16px;
+      padding: 11px 14px;
+      cursor: pointer;
+      color: var(--text);
+      background: linear-gradient(180deg, rgba(111,211,255,0.22), rgba(111,211,255,0.12));
+      border: 1px solid rgba(111,211,255,0.24);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+      transition: transform 0.12s ease, background 0.18s ease, opacity 0.18s ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button.secondary {
+      background: rgba(255,255,255,0.06);
+      border-color: rgba(255,255,255,0.08);
+    }
+    button.warn {
+      background: linear-gradient(180deg, rgba(255,141,141,0.24), rgba(255,141,141,0.12));
+      border-color: rgba(255,141,141,0.24);
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .hero-tag {
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(111, 211, 255, 0.12);
+      border: 1px solid rgba(111, 211, 255, 0.18);
+      color: var(--accent);
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+
+    .board-wrap {
+      position: relative;
+      background: linear-gradient(145deg, var(--board-wood-1), var(--board-wood-2));
+      border-radius: 28px;
+      box-shadow: 0 22px 70px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.25);
+      border: 1px solid rgba(84, 49, 12, 0.45);
+      overflow: hidden;
+      padding: 18px;
+      min-height: 640px;
+      display: grid;
+      place-items: center;
+    }
+
+    .board-wrap::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,0.06), transparent 10%, transparent 90%, rgba(0,0,0,0.06)),
+        repeating-linear-gradient(90deg, rgba(90,52,17,0.06) 0 2px, transparent 2px 30px),
+        repeating-linear-gradient(0deg, rgba(90,52,17,0.05) 0 2px, transparent 2px 32px);
+      pointer-events: none;
+      mix-blend-mode: multiply;
+    }
+
+    canvas {
+      display: block;
+      width: min(88vmin, 100%);
+      height: auto;
+      max-width: 920px;
+      touch-action: none;
+      position: relative;
+      z-index: 1;
+      filter: drop-shadow(0 10px 18px rgba(0,0,0,0.12));
+    }
+
+    .status-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .metric {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 18px;
+      padding: 12px 14px;
+    }
+    .metric .label {
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .metric .value {
+      font-size: 1.05rem;
+      font-weight: 700;
+    }
+
+    .log {
+      max-height: 250px;
+      overflow: auto;
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(0,0,0,0.25);
+      border: 1px solid rgba(255,255,255,0.05);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
+    .log-entry {
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .log-entry:last-child { border-bottom: 0; }
+
+    .rank-ladder {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip {
+      padding: 7px 11px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.06);
+      color: var(--muted);
+    }
+    .chip.active {
+      color: var(--text);
+      background: rgba(111,211,255,0.14);
+      border-color: rgba(111,211,255,0.26);
+    }
+
+    .tiny {
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    .history-table th,
+    .history-table td {
+      text-align: left;
+      padding: 8px 6px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .history-table th { color: var(--muted); font-weight: 600; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 11px;
+      border-radius: 12px;
+      background: rgba(0,0,0,0.22);
+      border: 1px solid rgba(255,255,255,0.05);
+      font-size: 0.82rem;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      border: 1px solid rgba(255,255,255,0.35);
+    }
+    .dot.black { background: #0d0f13; }
+    .dot.white { background: #f4f6fb; }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 1220px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar, .center, .rightbar { min-height: auto; }
+      .status-bar { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 680px) {
+      .shell { width: min(100vw - 12px, 100%); margin: 6px auto 18px; gap: 10px; }
+      .panel { border-radius: 18px; }
+      .sidebar, .center, .rightbar { padding: 12px; }
+      .grid-2, .btn-row.two, .btn-row.three, .status-bar { grid-template-columns: 1fr; }
+      .board-wrap { padding: 10px; min-height: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="panel sidebar">
+      <div class="hero">
+        <div>
+          <h1>Go Studio Prototype</h1>
+          <p class="subtitle">A modern browser-based Go opponent with adjustable rank strength, responsive UI, move analysis, and a self-contained rules engine.</p>
+        </div>
+        <div class="hero-tag">Prototype</div>
+      </div>
+
+      <div class="section">
+        <h3>Game Setup</h3>
+        <div class="grid-2">
+          <label>Board Size
+            <select id="boardSizeSelect">
+              <option value="9">9×9</option>
+              <option value="13">13×13</option>
+              <option value="19" selected>19×19</option>
+            </select>
+          </label>
+          <label>Play As
+            <select id="playerColorSelect">
+              <option value="1">Black</option>
+              <option value="2" selected>White</option>
+            </select>
+          </label>
+          <label>CPU Rank
+            <select id="difficultySelect"></select>
+          </label>
+          <label>Komi
+            <input id="komiInput" type="number" value="6.5" step="0.5" min="0" max="20" />
+          </label>
+        </div>
+        <div class="btn-row two">
+          <button id="newGameBtn">New Game</button>
+          <button id="swapSidesBtn" class="secondary">Swap Sides</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Controls</h3>
+        <div class="btn-row three">
+          <button id="passBtn">Pass</button>
+          <button id="undoBtn" class="secondary">Undo</button>
+          <button id="hintBtn" class="secondary">Hint</button>
+        </div>
+        <div class="btn-row two">
+          <button id="estimateBtn" class="secondary">Estimate Score</button>
+          <button id="exportBtn" class="secondary">Export Record</button>
+        </div>
+        <div class="btn-row two">
+          <button id="toggleCoordsBtn" class="secondary">Toggle Coordinates</button>
+          <button id="resignBtn" class="warn">Resign</button>
+        </div>
+        <p class="tiny">Rules implemented: liberties, captures, suicide prevention, simple ko, passing, resignation, and rough territory estimation. Ranking here is a prototype mapping, not a certified rating ladder.</p>
+      </div>
+
+      <div class="section">
+        <h3>CPU Strength Ladder</h3>
+        <div id="rankLadder" class="rank-ladder"></div>
+        <p id="rankDescription" class="tiny"></p>
+      </div>
+
+      <div class="section">
+        <h3>System Log</h3>
+        <div id="log" class="log"></div>
+      </div>
+    </aside>
+
+    <main class="panel center">
+      <div class="status-bar">
+        <div class="metric"><div class="label">Turn</div><div class="value" id="turnLabel">Black</div></div>
+        <div class="metric"><div class="label">Move</div><div class="value" id="moveLabel">0</div></div>
+        <div class="metric"><div class="label">Captures</div><div class="value" id="captureLabel">B 0 · W 0</div></div>
+        <div class="metric"><div class="label">Status</div><div class="value" id="statusLabel">Ready</div></div>
+      </div>
+
+      <div class="board-wrap">
+        <canvas id="boardCanvas" width="980" height="980"></canvas>
+      </div>
+
+      <div class="section">
+        <h3>Game State</h3>
+        <div class="grid-2">
+          <div class="badge"><span class="dot black"></span> You: <strong id="youColorLabel">White</strong></div>
+          <div class="badge"><span class="dot white"></span> CPU: <strong id="cpuColorLabel">Black</strong></div>
+          <div class="badge">Last move: <strong id="lastMoveLabel">—</strong></div>
+          <div class="badge">Score estimate: <strong id="estimateLabel">Not calculated</strong></div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="panel rightbar">
+      <div class="section">
+        <h3>Move History</h3>
+        <div style="overflow:auto; max-height:420px;">
+          <table class="history-table">
+            <thead>
+              <tr><th>#</th><th>Black</th><th>White</th></tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>How the Prototype Thinks</h3>
+        <p class="tiny">The engine blends legality checks with tactical heuristics, candidate pruning, and shallow lookahead. Lower kyu levels favor safer randomization; stronger ranks do more local reading, value shape and liberties more sharply, and reduce blunders.</p>
+      </div>
+
+      <div class="section">
+        <h3>Immediate Upgrade Targets</h3>
+        <div class="stack tiny">
+          <div>• Replace heuristic search with Monte Carlo tree search plus neural priors.</div>
+          <div>• Add SGF import/export, time controls, handicap stones, and review mode.</div>
+          <div>• Improve scoring with full territory resolution, seki awareness, and dead-stone marking.</div>
+          <div>• Support engine workers for stronger play without freezing the UI.</div>
+          <div>• Add joseki training, tsumego mode, and online/local multiplayer.</div>
+        </div>
+      </div>
+
+      <div class="footer-note">
+        This prototype is tuned to feel playable and modern in a browser first. On large 19×19 boards, dan-level play here is only an approximation of stronger amateur behavior rather than a true dan-calibrated engine.
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const EMPTY = 0;
+    const BLACK = 1;
+    const WHITE = 2;
+    const LETTERS = 'ABCDEFGHJKLMNOPQRST';
+
+    const DIFFICULTIES = [
+      { value: '30k', label: '30 kyu', randomness: 0.75, depth: 0, beam: 18, territory: 0.2, tactical: 0.5, desc: 'Mostly legal random moves with mild center preference. Intended for a first-contact opponent.' },
+      { value: '20k', label: '20 kyu', randomness: 0.45, depth: 0, beam: 18, territory: 0.35, tactical: 0.75, desc: 'Begins to prefer connection, avoids obvious self-atari, and notices direct captures.' },
+      { value: '10k', label: '10 kyu', randomness: 0.22, depth: 1, beam: 20, territory: 0.55, tactical: 1.0, desc: 'Looks locally ahead, values liberties, and plays more coherent fighting shapes.' },
+      { value: '5k', label: '5 kyu', randomness: 0.12, depth: 1, beam: 18, territory: 0.75, tactical: 1.15, desc: 'Better at tactical defense, peeping, connection, and punishing loose groups.' },
+      { value: '1k', label: '1 kyu', randomness: 0.07, depth: 2, beam: 14, territory: 0.95, tactical: 1.25, desc: 'Shallow reading with stronger tactical balance and calmer local judgment.' },
+      { value: '1d', label: '1 dan', randomness: 0.03, depth: 2, beam: 12, territory: 1.05, tactical: 1.35, desc: 'More selective, more consistent, and somewhat better at sente-style forcing moves.' },
+      { value: '3d', label: '3 dan', randomness: 0.01, depth: 3, beam: 10, territory: 1.12, tactical: 1.45, desc: 'The strongest prototype level here: deeper local reading, cleaner candidate pruning, and fewer unforced errors.' },
+    ];
+
+    const boardCanvas = document.getElementById('boardCanvas');
+    const ctx = boardCanvas.getContext('2d');
+    const boardSizeSelect = document.getElementById('boardSizeSelect');
+    const playerColorSelect = document.getElementById('playerColorSelect');
+    const difficultySelect = document.getElementById('difficultySelect');
+    const komiInput = document.getElementById('komiInput');
+    const newGameBtn = document.getElementById('newGameBtn');
+    const swapSidesBtn = document.getElementById('swapSidesBtn');
+    const passBtn = document.getElementById('passBtn');
+    const undoBtn = document.getElementById('undoBtn');
+    const hintBtn = document.getElementById('hintBtn');
+    const estimateBtn = document.getElementById('estimateBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const toggleCoordsBtn = document.getElementById('toggleCoordsBtn');
+    const resignBtn = document.getElementById('resignBtn');
+    const historyBody = document.getElementById('historyBody');
+    const logEl = document.getElementById('log');
+    const turnLabel = document.getElementById('turnLabel');
+    const moveLabel = document.getElementById('moveLabel');
+    const captureLabel = document.getElementById('captureLabel');
+    const statusLabel = document.getElementById('statusLabel');
+    const youColorLabel = document.getElementById('youColorLabel');
+    const cpuColorLabel = document.getElementById('cpuColorLabel');
+    const lastMoveLabel = document.getElementById('lastMoveLabel');
+    const estimateLabel = document.getElementById('estimateLabel');
+    const rankLadder = document.getElementById('rankLadder');
+    const rankDescription = document.getElementById('rankDescription');
+
+    let boardSize = 19;
+    let board = [];
+    let currentPlayer = BLACK;
+    let humanColor = WHITE;
+    let cpuColor = BLACK;
+    let captures = { [BLACK]: 0, [WHITE]: 0 };
+    let gameOver = false;
+    let lastMove = null;
+    let lastBoardHash = null;
+    let previousBoardHash = null;
+    let history = [];
+    let snapshots = [];
+    let passCount = 0;
+    let showCoordinates = true;
+    let hintPoint = null;
+    let thinking = false;
+    let activeDifficulty = DIFFICULTIES[4];
+    let lastEstimate = null;
+
+    function populateDifficultyOptions() {
+      difficultySelect.innerHTML = DIFFICULTIES.map((d, i) => `<option value="${d.value}" ${i === 4 ? 'selected' : ''}>${d.label}</option>`).join('');
+      renderRankLadder();
+    }
+
+    function renderRankLadder() {
+      rankLadder.innerHTML = DIFFICULTIES.map(d => `<span class="chip ${d.value === activeDifficulty.value ? 'active' : ''}">${d.label}</span>`).join('');
+      rankDescription.textContent = activeDifficulty.desc;
+    }
+
+    function log(message) {
+      const div = document.createElement('div');
+      div.className = 'log-entry';
+      div.textContent = `${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} — ${message}`;
+      logEl.prepend(div);
+      while (logEl.children.length > 80) logEl.removeChild(logEl.lastChild);
+    }
+
+    function createBoard(size) {
+      return Array.from({ length: size }, () => Array(size).fill(EMPTY));
+    }
+
+    function cloneBoard(src) {
+      return src.map(row => [...row]);
+    }
+
+    function other(color) {
+      return color === BLACK ? WHITE : BLACK;
+    }
+
+    function inside(x, y) {
+      return x >= 0 && x < boardSize && y >= 0 && y < boardSize;
+    }
+
+    function neighbors(x, y) {
+      return [[x+1,y],[x-1,y],[x,y+1],[x,y-1]].filter(([nx,ny]) => inside(nx,ny));
+    }
+
+    function boardHash(bd) {
+      return bd.map(row => row.join('')).join('|');
+    }
+
+    function saveSnapshot() {
+      snapshots.push({
+        board: cloneBoard(board),
+        currentPlayer,
+        captures: { ...captures },
+        lastMove: lastMove ? { ...lastMove } : null,
+        previousBoardHash,
+        lastBoardHash,
+        passCount,
+        history: history.map(m => ({ ...m })),
+        gameOver,
+        hintPoint: hintPoint ? { ...hintPoint } : null,
+        lastEstimate: lastEstimate ? { ...lastEstimate } : null,
+      });
+      if (snapshots.length > 400) snapshots.shift();
+    }
+
+    function restoreSnapshot(snapshot) {
+      board = cloneBoard(snapshot.board);
+      currentPlayer = snapshot.currentPlayer;
+      captures = { ...snapshot.captures };
+      lastMove = snapshot.lastMove ? { ...snapshot.lastMove } : null;
+      previousBoardHash = snapshot.previousBoardHash;
+      lastBoardHash = snapshot.lastBoardHash;
+      passCount = snapshot.passCount;
+      history = snapshot.history.map(m => ({ ...m }));
+      gameOver = snapshot.gameOver;
+      hintPoint = snapshot.hintPoint ? { ...snapshot.hintPoint } : null;
+      lastEstimate = snapshot.lastEstimate ? { ...snapshot.lastEstimate } : null;
+      renderAll();
+    }
+
+    function getGroupAndLiberties(bd, x, y) {
+      const color = bd[y][x];
+      if (color === EMPTY) return { group: [], liberties: new Set() };
+      const stack = [[x, y]];
+      const seen = new Set([`${x},${y}`]);
+      const group = [];
+      const liberties = new Set();
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        group.push([cx, cy]);
+        for (const [nx, ny] of neighbors(cx, cy)) {
+          const v = bd[ny][nx];
+          if (v === EMPTY) liberties.add(`${nx},${ny}`);
+          else if (v === color && !seen.has(`${nx},${ny}`)) {
+            seen.add(`${nx},${ny}`);
+            stack.push([nx, ny]);
+          }
+        }
+      }
+      return { group, liberties };
+    }
+
+    function removeGroup(bd, group) {
+      for (const [x, y] of group) bd[y][x] = EMPTY;
+    }
+
+    function isEyeLike(bd, x, y, color) {
+      if (bd[y][x] !== EMPTY) return false;
+      for (const [nx, ny] of neighbors(x, y)) {
+        if (bd[ny][nx] !== color) return false;
+      }
+      return true;
+    }
+
+    function applyMoveToBoard(bd, x, y, color) {
+      const result = { legal: false, captured: 0, selfGroup: null, koHash: null, board: null, message: '' };
+      if (!inside(x, y) || bd[y][x] !== EMPTY) {
+        result.message = 'Point occupied.';
+        return result;
+      }
+      const newBoard = cloneBoard(bd);
+      newBoard[y][x] = color;
+      let captured = 0;
+      const opp = other(color);
+      for (const [nx, ny] of neighbors(x, y)) {
+        if (newBoard[ny][nx] === opp) {
+          const info = getGroupAndLiberties(newBoard, nx, ny);
+          if (info.liberties.size === 0) {
+            captured += info.group.length;
+            removeGroup(newBoard, info.group);
+          }
+        }
+      }
+      const selfInfo = getGroupAndLiberties(newBoard, x, y);
+      if (selfInfo.liberties.size === 0) {
+        result.message = 'Suicide is not allowed.';
+        return result;
+      }
+      result.legal = true;
+      result.captured = captured;
+      result.selfGroup = selfInfo;
+      result.board = newBoard;
+      result.koHash = boardHash(newBoard);
+      return result;
+    }
+
+    function playMove(x, y, color, opts = {}) {
+      if (gameOver || thinking) return false;
+      const trial = applyMoveToBoard(board, x, y, color);
+      if (!trial.legal) {
+        if (!opts.silent) log(trial.message);
+        return false;
+      }
+      if (previousBoardHash && trial.koHash === previousBoardHash) {
+        if (!opts.silent) log('Illegal due to simple ko.');
+        return false;
+      }
+      saveSnapshot();
+      previousBoardHash = boardHash(board);
+      board = trial.board;
+      lastBoardHash = trial.koHash;
+      passCount = 0;
+      captures[color] += trial.captured;
+      currentPlayer = other(color);
+      lastMove = { x, y, color, pass: false };
+      hintPoint = null;
+      lastEstimate = null;
+      history.push({
+        index: history.length + 1,
+        color,
+        x,
+        y,
+        label: coordLabel(x, y),
+        pass: false,
+      });
+      renderAll();
+      if (!opts.silent) log(`${colorName(color)} played ${coordLabel(x, y)}${trial.captured ? ` and captured ${trial.captured}` : ''}.`);
+      maybeCpuTurn();
+      return true;
+    }
+
+    function passTurn(color, silent = false) {
+      if (gameOver || thinking) return;
+      saveSnapshot();
+      previousBoardHash = boardHash(board);
+      lastBoardHash = previousBoardHash;
+      currentPlayer = other(color);
+      passCount += 1;
+      lastMove = { pass: true, color };
+      history.push({ index: history.length + 1, color, pass: true, label: 'Pass' });
+      renderAll();
+      if (!silent) log(`${colorName(color)} passed.`);
+      if (passCount >= 2) finishGameByScoring();
+      else maybeCpuTurn();
+    }
+
+    function resign(color) {
+      if (gameOver) return;
+      gameOver = true;
+      statusLabel.textContent = `${colorName(other(color))} wins by resignation`;
+      log(`${colorName(color)} resigned. ${colorName(other(color))} wins.`);
+      renderAll();
+    }
+
+    function coordLabel(x, y) {
+      return `${LETTERS[x]}${boardSize - y}`;
+    }
+
+    function colorName(color) {
+      return color === BLACK ? 'Black' : 'White';
+    }
+
+    function countAdjacentColors(bd, x, y) {
+      let black = 0, white = 0, empty = 0;
+      for (const [nx, ny] of neighbors(x, y)) {
+        const v = bd[ny][nx];
+        if (v === BLACK) black++;
+        else if (v === WHITE) white++;
+        else empty++;
+      }
+      return { black, white, empty };
+    }
+
+    function hasNearbyStone(bd, x, y, radius = 2) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          const ny = y + dy;
+          if (inside(nx, ny) && bd[ny][nx] !== EMPTY) return true;
+        }
+      }
+      return false;
+    }
+
+    function candidateMoves(bd, color, difficulty) {
+      const candidates = [];
+      const openingPhase = history.length < Math.max(10, boardSize);
+      for (let y = 0; y < boardSize; y++) {
+        for (let x = 0; x < boardSize; x++) {
+          if (bd[y][x] !== EMPTY) continue;
+          if (!openingPhase && !hasNearbyStone(bd, x, y, boardSize === 19 ? 2 : 1)) continue;
+          const trial = applyMoveToBoard(bd, x, y, color);
+          if (!trial.legal) continue;
+          if (previousBoardHash && boardHash(trial.board) === previousBoardHash) continue;
+          const score = staticMoveScore(bd, x, y, color, trial, difficulty);
+          candidates.push({ x, y, score, board: trial.board, captured: trial.captured, selfGroup: trial.selfGroup });
+        }
+      }
+      if (!candidates.length) return [];
+      candidates.sort((a, b) => b.score - a.score);
+      const beam = Math.min(candidates.length, difficulty.beam + (boardSize === 19 ? 6 : 0));
+      return candidates.slice(0, beam);
+    }
+
+    function staticMoveScore(bd, x, y, color, trial, difficulty) {
+      const opp = other(color);
+      const center = (boardSize - 1) / 2;
+      const dist = Math.abs(x - center) + Math.abs(y - center);
+      const normCenter = 1 - (dist / (boardSize - 1));
+      const adj = countAdjacentColors(bd, x, y);
+      const libs = trial.selfGroup.liberties.size;
+      let atariTargets = 0;
+      let savedGroups = 0;
+      for (const [nx, ny] of neighbors(x, y)) {
+        if (bd[ny][nx] === opp) {
+          const info = getGroupAndLiberties(bd, nx, ny);
+          if (info.liberties.size === 1) atariTargets += info.group.length;
+        } else if (bd[ny][nx] === color) {
+          const info = getGroupAndLiberties(bd, nx, ny);
+          if (info.liberties.size === 1) savedGroups += info.group.length;
+        }
+      }
+
+      let eyePenalty = isEyeLike(bd, x, y, color) ? 2.4 : 0;
+      let selfAtariPenalty = libs <= 1 ? 3.5 : libs === 2 ? 0.8 : 0;
+      let connectionBonus = adj[color === BLACK ? 'black' : 'white'] * 0.9;
+      let attackBonus = adj[color === BLACK ? 'white' : 'black'] * 0.55;
+      let captureBonus = trial.captured * 5.2 * difficulty.tactical;
+      let saveBonus = savedGroups * 2.5 * difficulty.tactical;
+      let atariBonus = atariTargets * 1.35 * difficulty.tactical;
+      let libertyBonus = Math.min(libs, 5) * 0.75;
+      let territoryBias = normCenter * (history.length < boardSize * 2 ? 1.4 : 0.3) + (hasNearbyStone(bd, x, y, 1) ? 0.7 : 0);
+      let shapeBonus = 0;
+      if (adj.empty <= 1) shapeBonus -= 1.1;
+      if (adj.empty >= 3) shapeBonus += 0.35;
+      if ((x === 3 || x === boardSize - 4) && (y === 3 || y === boardSize - 4) && boardSize >= 13) shapeBonus += 1.0;
+      if ((x === 2 || x === boardSize - 3) && (y === 2 || y === boardSize - 3) && boardSize === 9) shapeBonus += 0.7;
+      if (history.length < 6 && (x === center && y === center) && boardSize === 9) shapeBonus += 0.8;
+      return captureBonus + saveBonus + atariBonus + libertyBonus + connectionBonus + attackBonus + shapeBonus + territoryBias * difficulty.territory - eyePenalty - selfAtariPenalty;
+    }
+
+    function evaluateBoard(bd, color) {
+      const opp = other(color);
+      let score = 0;
+      let myStones = 0;
+      let oppStones = 0;
+      let myLibs = 0;
+      let oppLibs = 0;
+      const seen = new Set();
+      for (let y = 0; y < boardSize; y++) {
+        for (let x = 0; x < boardSize; x++) {
+          const v = bd[y][x];
+          if (v === EMPTY) continue;
+          if (v === color) myStones++;
+          if (v === opp) oppStones++;
+          const key = `${x},${y}`;
+          if (!seen.has(key)) {
+            const info = getGroupAndLiberties(bd, x, y);
+            info.group.forEach(([gx, gy]) => seen.add(`${gx},${gy}`));
+            if (v === color) myLibs += info.liberties.size + info.group.length * 0.15;
+            else oppLibs += info.liberties.size + info.group.length * 0.15;
+          }
+        }
+      }
+      const terr = estimateTerritory(bd);
+      score += (myStones - oppStones) * 0.18;
+      score += (myLibs - oppLibs) * 0.82;
+      score += (terr[color] - terr[opp]) * 1.3;
+      return score;
+    }
+
+    function negamax(bd, color, depth, alpha, beta, difficulty) {
+      const candidates = candidateMoves(bd, color, difficulty);
+      if (depth === 0 || !candidates.length) {
+        return { score: evaluateBoard(bd, color), move: null };
+      }
+      let best = { score: -Infinity, move: candidates[0] || null };
+      for (const cand of candidates) {
+        const score = -negamax(cand.board, other(color), depth - 1, -beta, -alpha, difficulty).score + cand.score * 0.15;
+        if (score > best.score) {
+          best = { score, move: cand };
+        }
+        alpha = Math.max(alpha, score);
+        if (alpha >= beta) break;
+      }
+      return best;
+    }
+
+    function chooseCpuMove(color, forHint = false) {
+      const difficulty = activeDifficulty;
+      const candidates = candidateMoves(board, color, difficulty);
+      if (!candidates.length) return null;
+      let selected;
+      if (difficulty.depth > 0) {
+        const top = candidates.slice(0, Math.min(candidates.length, Math.max(5, difficulty.beam)));
+        let bestScore = -Infinity;
+        let bestMove = top[0];
+        for (const cand of top) {
+          const score = -negamax(cand.board, other(color), difficulty.depth - 1, -Infinity, Infinity, difficulty).score + cand.score * 0.2;
+          cand.deepScore = score;
+          if (score > bestScore) {
+            bestScore = score;
+            bestMove = cand;
+          }
+        }
+        selected = bestMove;
+      } else {
+        selected = candidates[0];
+      }
+
+      const sorted = [...candidates].sort((a, b) => (b.deepScore ?? b.score) - (a.deepScore ?? a.score));
+      const randomness = forHint ? 0 : difficulty.randomness;
+      const pool = Math.max(1, Math.ceil(sorted.length * Math.max(0.08, randomness)));
+      const chosenPool = sorted.slice(0, pool);
+      return chosenPool[Math.floor(Math.random() * chosenPool.length)] || selected;
+    }
+
+    function maybeCpuTurn() {
+      renderAll();
+      if (gameOver || currentPlayer !== cpuColor) return;
+      thinking = true;
+      statusLabel.textContent = 'CPU thinking…';
+      setTimeout(() => {
+        const move = chooseCpuMove(cpuColor);
+        thinking = false;
+        if (!move) {
+          passTurn(cpuColor);
+          return;
+        }
+        const terr = estimateTerritory(board);
+        const cpuLead = terr[cpuColor] + captures[cpuColor] - (terr[humanColor] + captures[humanColor] + (cpuColor === BLACK ? 0 : parseFloat(komiInput.value || '6.5')));
+        if (history.length > boardSize * 1.8 && move.score < 0.85 && cpuLead > 4) {
+          passTurn(cpuColor);
+          return;
+        }
+        playMove(move.x, move.y, cpuColor, { silent: false });
+      }, 130);
+    }
+
+    function estimateTerritory(bd) {
+      const visited = new Set();
+      const terr = { [BLACK]: captures[BLACK], [WHITE]: captures[WHITE] + parseFloat(komiInput.value || '6.5') };
+      for (let y = 0; y < boardSize; y++) {
+        for (let x = 0; x < boardSize; x++) {
+          if (bd[y][x] !== EMPTY || visited.has(`${x},${y}`)) continue;
+          const stack = [[x, y]];
+          const region = [];
+          const borderColors = new Set();
+          visited.add(`${x},${y}`);
+          while (stack.length) {
+            const [cx, cy] = stack.pop();
+            region.push([cx, cy]);
+            for (const [nx, ny] of neighbors(cx, cy)) {
+              const v = bd[ny][nx];
+              if (v === EMPTY && !visited.has(`${nx},${ny}`)) {
+                visited.add(`${nx},${ny}`);
+                stack.push([nx, ny]);
+              } else if (v !== EMPTY) {
+                borderColors.add(v);
+              }
+            }
+          }
+          if (borderColors.size === 1) {
+            const owner = [...borderColors][0];
+            terr[owner] += region.length;
+          }
+        }
+      }
+      return terr;
+    }
+
+    function finishGameByScoring() {
+      gameOver = true;
+      lastEstimate = estimateTerritory(board);
+      const black = lastEstimate[BLACK];
+      const white = lastEstimate[WHITE];
+      const diff = Math.abs(black - white).toFixed(1);
+      const winner = black > white ? 'Black' : 'White';
+      statusLabel.textContent = `${winner} wins by ${diff}`;
+      estimateLabel.textContent = `B ${black.toFixed(1)} · W ${white.toFixed(1)}`;
+      log(`Both players passed. Estimated result: Black ${black.toFixed(1)}, White ${white.toFixed(1)}. ${winner} wins by ${diff}.`);
+      renderAll();
+    }
+
+    function renderBoard() {
+      const size = boardCanvas.width;
+      ctx.clearRect(0, 0, size, size);
+      const pad = boardSize === 19 ? 56 : boardSize === 13 ? 64 : 76;
+      const cell = (size - pad * 2) / (boardSize - 1);
+      const radius = Math.max(12, cell * 0.47);
+
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--board-line').trim();
+      ctx.lineWidth = boardSize === 19 ? 2.1 : 2.6;
+
+      for (let i = 0; i < boardSize; i++) {
+        const p = pad + i * cell;
+        ctx.beginPath();
+        ctx.moveTo(pad, p);
+        ctx.lineTo(size - pad, p);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p, pad);
+        ctx.lineTo(p, size - pad);
+        ctx.stroke();
+      }
+
+      drawStarPoints(pad, cell);
+
+      if (showCoordinates) {
+        ctx.fillStyle = 'rgba(32, 16, 4, 0.86)';
+        ctx.font = `${Math.max(18, cell * 0.34)}px Inter, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (let i = 0; i < boardSize; i++) {
+          const p = pad + i * cell;
+          ctx.fillText(LETTERS[i], p, pad * 0.42);
+          ctx.fillText(LETTERS[i], p, size - pad * 0.42 + 2);
+          ctx.fillText(String(boardSize - i), pad * 0.42, p + 1);
+          ctx.fillText(String(boardSize - i), size - pad * 0.42 + 2, p + 1);
+        }
+      }
+
+      for (let y = 0; y < boardSize; y++) {
+        for (let x = 0; x < boardSize; x++) {
+          if (board[y][x] === EMPTY) continue;
+          const px = pad + x * cell;
+          const py = pad + y * cell;
+          drawStone(px, py, radius, board[y][x]);
+        }
+      }
+
+      if (lastMove && !lastMove.pass) {
+        const px = pad + lastMove.x * cell;
+        const py = pad + lastMove.y * cell;
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(4, radius * 0.16), 0, Math.PI * 2);
+        ctx.fillStyle = lastMove.color === BLACK ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.85)';
+        ctx.fill();
+      }
+
+      if (hintPoint) {
+        const px = pad + hintPoint.x * cell;
+        const py = pad + hintPoint.y * cell;
+        ctx.beginPath();
+        ctx.arc(px, py, radius * 0.6, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(111, 211, 255, 0.95)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 6]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      boardCanvas.dataset.pad = String(pad);
+      boardCanvas.dataset.cell = String(cell);
+    }
+
+    function drawStone(x, y, radius, color) {
+      const grad = ctx.createRadialGradient(x - radius * 0.32, y - radius * 0.34, radius * 0.18, x, y, radius);
+      if (color === BLACK) {
+        grad.addColorStop(0, '#5b616c');
+        grad.addColorStop(0.22, '#20252d');
+        grad.addColorStop(1, '#090b0f');
+      } else {
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.35, '#edf2fb');
+        grad.addColorStop(1, '#b9c2d3');
+      }
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = color === BLACK ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.12)';
+      ctx.stroke();
+    }
+
+    function drawStarPoints(pad, cell) {
+      let points = [];
+      if (boardSize === 19) points = [3, 9, 15];
+      if (boardSize === 13) points = [3, 6, 9];
+      if (boardSize === 9) points = [2, 4, 6];
+      const combos = [];
+      if (boardSize === 9) {
+        combos.push([4,4],[2,2],[2,6],[6,2],[6,6]);
+      } else {
+        for (const x of points) for (const y of points) combos.push([x,y]);
+      }
+      ctx.fillStyle = 'rgba(36, 20, 5, 0.92)';
+      for (const [x, y] of combos) {
+        const px = pad + x * cell;
+        const py = pad + y * cell;
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(4.2, cell * 0.09), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function renderHistory() {
+      const rows = [];
+      for (let i = 0; i < history.length; i += 2) {
+        const b = history[i];
+        const w = history[i + 1];
+        rows.push(`<tr><td>${Math.floor(i / 2) + 1}</td><td>${b && b.color === BLACK ? b.label : ''}</td><td>${w && w.color === WHITE ? w.label : ''}</td></tr>`);
+      }
+      historyBody.innerHTML = rows.join('');
+    }
+
+    function renderStatus() {
+      turnLabel.textContent = colorName(currentPlayer);
+      moveLabel.textContent = String(history.length);
+      captureLabel.textContent = `B ${captures[BLACK]} · W ${captures[WHITE]}`;
+      if (!gameOver && !thinking) statusLabel.textContent = currentPlayer === humanColor ? 'Your move' : 'CPU turn';
+      youColorLabel.textContent = colorName(humanColor);
+      cpuColorLabel.textContent = colorName(cpuColor);
+      lastMoveLabel.textContent = !lastMove ? '—' : (lastMove.pass ? `${colorName(lastMove.color)} pass` : `${colorName(lastMove.color)} ${coordLabel(lastMove.x, lastMove.y)}`);
+      if (lastEstimate) estimateLabel.textContent = `B ${lastEstimate[BLACK].toFixed(1)} · W ${lastEstimate[WHITE].toFixed(1)}`;
+    }
+
+    function renderAll() {
+      renderBoard();
+      renderHistory();
+      renderStatus();
+      renderRankLadder();
+      undoBtn.disabled = snapshots.length === 0 || thinking;
+      passBtn.disabled = gameOver || currentPlayer !== humanColor || thinking;
+      hintBtn.disabled = gameOver || currentPlayer !== humanColor || thinking;
+      resignBtn.disabled = gameOver || thinking;
+    }
+
+    function getCanvasPoint(evt) {
+      const rect = boardCanvas.getBoundingClientRect();
+      const scaleX = boardCanvas.width / rect.width;
+      const scaleY = boardCanvas.height / rect.height;
+      const x = (evt.clientX - rect.left) * scaleX;
+      const y = (evt.clientY - rect.top) * scaleY;
+      const pad = Number(boardCanvas.dataset.pad);
+      const cell = Number(boardCanvas.dataset.cell);
+      const gx = Math.round((x - pad) / cell);
+      const gy = Math.round((y - pad) / cell);
+      return { x: gx, y: gy };
+    }
+
+    function resetGame() {
+      boardSize = parseInt(boardSizeSelect.value, 10);
+      humanColor = parseInt(playerColorSelect.value, 10);
+      cpuColor = other(humanColor);
+      activeDifficulty = DIFFICULTIES.find(d => d.value === difficultySelect.value) || DIFFICULTIES[4];
+      board = createBoard(boardSize);
+      currentPlayer = BLACK;
+      captures = { [BLACK]: 0, [WHITE]: 0 };
+      history = [];
+      snapshots = [];
+      previousBoardHash = null;
+      lastBoardHash = boardHash(board);
+      lastMove = null;
+      passCount = 0;
+      gameOver = false;
+      hintPoint = null;
+      thinking = false;
+      lastEstimate = null;
+      renderAll();
+      log(`New ${boardSize}×${boardSize} game started. You are ${colorName(humanColor)}. CPU set to ${activeDifficulty.label}.`);
+      if (cpuColor === BLACK) maybeCpuTurn();
+    }
+
+    boardCanvas.addEventListener('click', (evt) => {
+      if (gameOver || thinking || currentPlayer !== humanColor) return;
+      const { x, y } = getCanvasPoint(evt);
+      if (!inside(x, y)) return;
+      playMove(x, y, humanColor);
+    });
+
+    newGameBtn.addEventListener('click', resetGame);
+    swapSidesBtn.addEventListener('click', () => {
+      playerColorSelect.value = playerColorSelect.value === '1' ? '2' : '1';
+      resetGame();
+    });
+    difficultySelect.addEventListener('change', () => {
+      activeDifficulty = DIFFICULTIES.find(d => d.value === difficultySelect.value) || DIFFICULTIES[4];
+      renderRankLadder();
+      log(`CPU difficulty set to ${activeDifficulty.label}.`);
+    });
+    passBtn.addEventListener('click', () => passTurn(humanColor));
+    undoBtn.addEventListener('click', () => {
+      if (!snapshots.length || thinking) return;
+      const target = cpuColor === BLACK && history.length <= 1 ? snapshots[snapshots.length - 1] : snapshots[Math.max(0, snapshots.length - (currentPlayer === humanColor ? 1 : 2))];
+      snapshots = snapshots.slice(0, Math.max(0, snapshots.indexOf(target)));
+      restoreSnapshot(target);
+      log('Undid the previous move sequence.');
+    });
+    hintBtn.addEventListener('click', () => {
+      if (gameOver || thinking || currentPlayer !== humanColor) return;
+      const move = chooseCpuMove(humanColor, true);
+      if (!move) {
+        log('No legal hint move found. Passing may be reasonable here.');
+        return;
+      }
+      hintPoint = { x: move.x, y: move.y };
+      renderAll();
+      log(`Hint: consider ${coordLabel(move.x, move.y)}.`);
+    });
+    estimateBtn.addEventListener('click', () => {
+      lastEstimate = estimateTerritory(board);
+      estimateLabel.textContent = `B ${lastEstimate[BLACK].toFixed(1)} · W ${lastEstimate[WHITE].toFixed(1)}`;
+      log(`Score estimate updated: Black ${lastEstimate[BLACK].toFixed(1)}, White ${lastEstimate[WHITE].toFixed(1)}.`);
+    });
+    exportBtn.addEventListener('click', () => {
+      const payload = {
+        boardSize,
+        komi: parseFloat(komiInput.value || '6.5'),
+        humanColor: colorName(humanColor),
+        cpuColor: colorName(cpuColor),
+        difficulty: activeDifficulty.label,
+        captures,
+        history,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `go-studio-record-${boardSize}x${boardSize}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      log('Exported a JSON game record.');
+    });
+    toggleCoordsBtn.addEventListener('click', () => {
+      showCoordinates = !showCoordinates;
+      renderAll();
+    });
+    resignBtn.addEventListener('click', () => resign(humanColor));
+
+    function init() {
+      populateDifficultyOptions();
+      resetGame();
+      window.addEventListener('resize', renderBoard);
+    }
+
+    init();
+  </script>
+</body>
+</html>
