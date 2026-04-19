@@ -21,6 +21,16 @@
       --radius: 22px;
     }
 
+    body.high-contrast {
+      --panel: rgba(0, 0, 0, 0.96);
+      --panel-soft: rgba(0, 0, 0, 0.92);
+      --text: #ffffff;
+      --muted: #d7e4ff;
+      --accent: #8fe7ff;
+      --board-line: rgba(0, 0, 0, 1);
+      background: #05070b;
+    }
+
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -361,6 +371,13 @@
           <label>CPU Rank
             <select id="difficultySelect"></select>
           </label>
+          <label>Engine
+            <select id="engineModeSelect">
+              <option value="heuristic" selected>Heuristic (Baseline)</option>
+              <option value="balanced">Balanced Search</option>
+              <option value="aggressive">Aggressive Tactical</option>
+            </select>
+          </label>
           <label>Komi
             <input id="komiInput" type="number" value="6.5" step="0.5" min="0" max="20" />
           </label>
@@ -385,6 +402,29 @@
       </div>
 
       <div class="section">
+        <h3>Time Controls</h3>
+        <div class="grid-2">
+          <label>Black Main (min)
+            <input id="blackMainTimeInput" type="number" min="0" max="180" step="1" value="10" />
+          </label>
+          <label>White Main (min)
+            <input id="whiteMainTimeInput" type="number" min="0" max="180" step="1" value="10" />
+          </label>
+          <label>Byo-yomi (sec)
+            <input id="byoYomiSecondsInput" type="number" min="0" max="180" step="1" value="30" />
+          </label>
+          <label>Periods
+            <input id="byoYomiPeriodsInput" type="number" min="0" max="10" step="1" value="5" />
+          </label>
+        </div>
+        <div class="btn-row two">
+          <button id="applyClockBtn" class="secondary">Apply Clock</button>
+          <button id="pauseClockBtn" class="secondary">Pause Clock</button>
+        </div>
+        <p class="tiny" id="clockSummary">Clock disabled until game starts.</p>
+      </div>
+
+      <div class="section">
         <h3>Controls</h3>
         <div class="btn-row three">
           <button id="passBtn">Pass</button>
@@ -396,6 +436,19 @@
           <button id="exportBtn" class="secondary">Export Record</button>
           <button id="exportSgfBtn" class="secondary">Export SGF</button>
         </div>
+        <div class="btn-row two">
+          <button id="importSgfBtn" class="secondary">Import SGF</button>
+          <button id="runTestsBtn" class="secondary">Run Engine Tests</button>
+        </div>
+        <div class="btn-row two">
+          <button id="finalizeScoreBtn" class="secondary">Finalize Score</button>
+          <button id="cancelScoringBtn" class="secondary">Cancel Scoring</button>
+        </div>
+        <div class="btn-row two">
+          <button id="highContrastBtn" class="secondary">High Contrast</button>
+          <button id="focusBoardBtn" class="secondary">Focus Board</button>
+        </div>
+        <input id="importSgfInput" type="file" accept=".sgf,.txt" style="display:none;" />
         <div class="btn-row two">
           <button id="toggleCoordsBtn" class="secondary">Toggle Coordinates</button>
           <button id="resignBtn" class="warn">Resign</button>
@@ -421,10 +474,11 @@
         <div class="metric"><div class="label">Move</div><div class="value" id="moveLabel">0</div></div>
         <div class="metric"><div class="label">Captures</div><div class="value" id="captureLabel">B 0 · W 0</div></div>
         <div class="metric"><div class="label">Status</div><div class="value" id="statusLabel">Ready</div></div>
+        <div class="metric"><div class="label">Render</div><div class="value" id="renderPerfLabel">0 ms</div></div>
       </div>
 
       <div class="board-wrap">
-        <canvas id="boardCanvas" width="980" height="980"></canvas>
+        <canvas id="boardCanvas" width="980" height="980" tabindex="0" role="application" aria-label="Go board. Use arrow keys to move cursor and Enter to play."></canvas>
       </div>
 
       <div class="section">
@@ -449,6 +503,32 @@
             <tbody id="historyBody"></tbody>
           </table>
         </div>
+      </div>
+
+      <div class="section">
+        <h3>Replay Navigation</h3>
+        <div class="btn-row two">
+          <button id="replayStartBtn" class="secondary">⏮ Start</button>
+          <button id="replayPrevBtn" class="secondary">◀ Prev</button>
+        </div>
+        <div class="btn-row two">
+          <button id="replayNextBtn" class="secondary">Next ▶</button>
+          <button id="replayEndBtn" class="secondary">End ⏭</button>
+        </div>
+        <div class="btn-row two">
+          <button id="resumePlayBtn" class="secondary">Resume Play</button>
+          <span class="badge" id="replayIndexLabel">Replay: Off</span>
+        </div>
+        <p class="tiny">Import an SGF to step through moves. You can resume from any replay position to continue analysis.</p>
+      </div>
+
+      <div class="section">
+        <h3>Post-game Analysis</h3>
+        <div class="btn-row">
+          <button id="analyzeGameBtn" class="secondary">Analyze Current Game</button>
+        </div>
+        <div id="analysisSummary" class="tiny">Run analysis to see evaluation swings and potential blunders.</div>
+        <div id="analysisList" class="log" style="max-height:220px;"></div>
       </div>
 
       <div class="section">
@@ -494,6 +574,7 @@
     const boardSizeSelect = document.getElementById('boardSizeSelect');
     const playerColorSelect = document.getElementById('playerColorSelect');
     const difficultySelect = document.getElementById('difficultySelect');
+    const engineModeSelect = document.getElementById('engineModeSelect');
     const komiInput = document.getElementById('komiInput');
     const koRuleSelect = document.getElementById('koRuleSelect');
     const useWorkerToggle = document.getElementById('useWorkerToggle');
@@ -505,14 +586,38 @@
     const estimateBtn = document.getElementById('estimateBtn');
     const exportBtn = document.getElementById('exportBtn');
     const exportSgfBtn = document.getElementById('exportSgfBtn');
+    const importSgfBtn = document.getElementById('importSgfBtn');
+    const importSgfInput = document.getElementById('importSgfInput');
+    const finalizeScoreBtn = document.getElementById('finalizeScoreBtn');
+    const cancelScoringBtn = document.getElementById('cancelScoringBtn');
+    const highContrastBtn = document.getElementById('highContrastBtn');
+    const focusBoardBtn = document.getElementById('focusBoardBtn');
     const toggleCoordsBtn = document.getElementById('toggleCoordsBtn');
     const resignBtn = document.getElementById('resignBtn');
+    const runTestsBtn = document.getElementById('runTestsBtn');
+    const blackMainTimeInput = document.getElementById('blackMainTimeInput');
+    const whiteMainTimeInput = document.getElementById('whiteMainTimeInput');
+    const byoYomiSecondsInput = document.getElementById('byoYomiSecondsInput');
+    const byoYomiPeriodsInput = document.getElementById('byoYomiPeriodsInput');
+    const applyClockBtn = document.getElementById('applyClockBtn');
+    const pauseClockBtn = document.getElementById('pauseClockBtn');
+    const clockSummary = document.getElementById('clockSummary');
+    const replayStartBtn = document.getElementById('replayStartBtn');
+    const replayPrevBtn = document.getElementById('replayPrevBtn');
+    const replayNextBtn = document.getElementById('replayNextBtn');
+    const replayEndBtn = document.getElementById('replayEndBtn');
+    const resumePlayBtn = document.getElementById('resumePlayBtn');
+    const replayIndexLabel = document.getElementById('replayIndexLabel');
+    const analyzeGameBtn = document.getElementById('analyzeGameBtn');
+    const analysisSummary = document.getElementById('analysisSummary');
+    const analysisList = document.getElementById('analysisList');
     const historyBody = document.getElementById('historyBody');
     const logEl = document.getElementById('log');
     const turnLabel = document.getElementById('turnLabel');
     const moveLabel = document.getElementById('moveLabel');
     const captureLabel = document.getElementById('captureLabel');
     const statusLabel = document.getElementById('statusLabel');
+    const renderPerfLabel = document.getElementById('renderPerfLabel');
     const youColorLabel = document.getElementById('youColorLabel');
     const cpuColorLabel = document.getElementById('cpuColorLabel');
     const lastMoveLabel = document.getElementById('lastMoveLabel');
@@ -537,10 +642,34 @@
     let hintPoint = null;
     let thinking = false;
     let activeDifficulty = DIFFICULTIES[4];
+    let engineMode = 'heuristic';
     let lastEstimate = null;
     let koRule = 'simple';
     let positionHashes = new Set();
     let cpuWorker = null;
+    let replayMode = false;
+    let replayFrames = [];
+    let replayIndex = 0;
+    let suspendAutoTurns = false;
+    let analysisReport = null;
+    let scoringMode = false;
+    let deadStones = new Set();
+    let cursorPoint = { x: 9, y: 9 };
+    let highContrast = false;
+    let lastRenderMs = 0;
+    let clockState = {
+      enabled: true,
+      paused: false,
+      byoYomiSeconds: 30,
+      byoYomiPeriods: 5,
+      players: {
+        [BLACK]: { mainMs: 10 * 60 * 1000, periodsLeft: 5, byoMs: 30 * 1000 },
+        [WHITE]: { mainMs: 10 * 60 * 1000, periodsLeft: 5, byoMs: 30 * 1000 },
+      },
+      activeColor: BLACK,
+      lastTick: null,
+      intervalId: null,
+    };
 
     function populateDifficultyOptions() {
       difficultySelect.innerHTML = DIFFICULTIES.map((d, i) => `<option value="${d.value}" ${i === 4 ? 'selected' : ''}>${d.label}</option>`).join('');
@@ -549,7 +678,130 @@
 
     function renderRankLadder() {
       rankLadder.innerHTML = DIFFICULTIES.map(d => `<span class="chip ${d.value === activeDifficulty.value ? 'active' : ''}">${d.label}</span>`).join('');
-      rankDescription.textContent = activeDifficulty.desc;
+      rankDescription.textContent = `${activeDifficulty.desc} · Engine: ${engineModeSelect.options[engineModeSelect.selectedIndex]?.text || engineMode}`;
+    }
+
+    function formatClock(ms) {
+      const clamped = Math.max(0, Math.round(ms / 1000));
+      const m = Math.floor(clamped / 60);
+      const s = clamped % 60;
+      return `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function applyClockSettings() {
+      const blackMain = Math.max(0, Number(blackMainTimeInput.value || 0));
+      const whiteMain = Math.max(0, Number(whiteMainTimeInput.value || 0));
+      const byoSeconds = Math.max(0, Number(byoYomiSecondsInput.value || 0));
+      const periods = Math.max(0, Number(byoYomiPeriodsInput.value || 0));
+      clockState.byoYomiSeconds = byoSeconds;
+      clockState.byoYomiPeriods = periods;
+      clockState.players[BLACK] = { mainMs: blackMain * 60 * 1000, periodsLeft: periods, byoMs: byoSeconds * 1000 };
+      clockState.players[WHITE] = { mainMs: whiteMain * 60 * 1000, periodsLeft: periods, byoMs: byoSeconds * 1000 };
+      clockState.activeColor = currentPlayer;
+      clockState.lastTick = Date.now();
+      clockState.enabled = blackMain > 0 || whiteMain > 0 || byoSeconds > 0;
+      updateClockSummary();
+      log(`Clock updated: B ${blackMain}m, W ${whiteMain}m, byo-yomi ${byoSeconds}s × ${periods}.`);
+    }
+
+    function updateClockSummary() {
+      const b = clockState.players[BLACK];
+      const w = clockState.players[WHITE];
+      const bText = `B ${formatClock(b.mainMs)}${clockState.byoYomiPeriods > 0 ? ` + ${b.periodsLeft}×${formatClock(b.byoMs)}` : ''}`;
+      const wText = `W ${formatClock(w.mainMs)}${clockState.byoYomiPeriods > 0 ? ` + ${w.periodsLeft}×${formatClock(w.byoMs)}` : ''}`;
+      const state = clockState.paused ? 'Paused' : 'Running';
+      clockSummary.textContent = `${bText} · ${wText} · ${state}`;
+      pauseClockBtn.textContent = clockState.paused ? 'Resume Clock' : 'Pause Clock';
+    }
+
+    function endByTimeout(loser) {
+      gameOver = true;
+      scoringMode = false;
+      stopClock();
+      const winner = other(loser);
+      statusLabel.textContent = `${colorName(winner)} wins on time`;
+      log(`${colorName(loser)} lost on time. ${colorName(winner)} wins.`);
+      renderAll();
+    }
+
+    function tickClock() {
+      if (!clockState.enabled || clockState.paused || gameOver || scoringMode || replayMode) return;
+      const now = Date.now();
+      if (!clockState.lastTick) clockState.lastTick = now;
+      let elapsed = now - clockState.lastTick;
+      clockState.lastTick = now;
+      const player = clockState.players[currentPlayer];
+      if (!player) return;
+
+      if (player.mainMs > 0) {
+        const usedMain = Math.min(player.mainMs, elapsed);
+        player.mainMs -= usedMain;
+        elapsed -= usedMain;
+      }
+
+      while (elapsed > 0) {
+        if (clockState.byoYomiPeriods <= 0) {
+          endByTimeout(currentPlayer);
+          return;
+        }
+        if (player.byoMs > elapsed) {
+          player.byoMs -= elapsed;
+          elapsed = 0;
+        } else {
+          elapsed -= player.byoMs;
+          player.periodsLeft -= 1;
+          if (player.periodsLeft < 0) {
+            endByTimeout(currentPlayer);
+            return;
+          }
+          player.byoMs = clockState.byoYomiSeconds * 1000;
+          if (player.periodsLeft === 0 && elapsed > 0) {
+            endByTimeout(currentPlayer);
+            return;
+          }
+        }
+      }
+
+      updateClockSummary();
+    }
+
+    function resetByoForNextTurn(color) {
+      const player = clockState.players[color];
+      if (!player) return;
+      if (player.mainMs <= 0 && clockState.byoYomiPeriods > 0 && player.periodsLeft > 0) {
+        player.byoMs = clockState.byoYomiSeconds * 1000;
+      }
+      clockState.activeColor = color;
+      clockState.lastTick = Date.now();
+      updateClockSummary();
+    }
+
+    function startClock() {
+      if (clockState.intervalId) clearInterval(clockState.intervalId);
+      clockState.lastTick = Date.now();
+      clockState.intervalId = setInterval(tickClock, 250);
+      updateClockSummary();
+    }
+
+    function stopClock() {
+      if (clockState.intervalId) clearInterval(clockState.intervalId);
+      clockState.intervalId = null;
+    }
+
+    function selectCpuMoveByEngine(color, forHint = false) {
+      if (engineMode === 'heuristic') return chooseCpuMove(color, forHint);
+      const base = chooseCpuMove(color, forHint);
+      const cands = candidateMoves(board, color, activeDifficulty);
+      if (!cands.length) return base;
+      if (engineMode === 'balanced') {
+        const idx = Math.min(cands.length - 1, Math.floor(cands.length * 0.2));
+        return cands[idx] || base;
+      }
+      if (engineMode === 'aggressive') {
+        const attack = cands.find((c) => c.captured > 0 || c.selfGroup?.liberties?.size <= 2);
+        return attack || base;
+      }
+      return base;
     }
 
     function log(message) {
@@ -584,8 +836,8 @@
       return bd.map(row => row.join('')).join('|');
     }
 
-    function saveSnapshot() {
-      snapshots.push({
+    function getSerializableGameState() {
+      return {
         board: cloneBoard(board),
         currentPlayer,
         captures: { ...captures },
@@ -599,25 +851,75 @@
         lastEstimate: lastEstimate ? { ...lastEstimate } : null,
         koRule,
         positionHashes: [...positionHashes],
-      });
+        scoringMode,
+        deadStones: [...deadStones],
+      };
+    }
+
+    function applySerializableGameState(state) {
+      board = cloneBoard(state.board);
+      currentPlayer = state.currentPlayer;
+      captures = { ...state.captures };
+      lastMove = state.lastMove ? { ...state.lastMove } : null;
+      previousBoardHash = state.previousBoardHash;
+      lastBoardHash = state.lastBoardHash;
+      passCount = state.passCount;
+      history = state.history.map(m => ({ ...m }));
+      gameOver = state.gameOver;
+      hintPoint = state.hintPoint ? { ...state.hintPoint } : null;
+      lastEstimate = state.lastEstimate ? { ...state.lastEstimate } : null;
+      koRule = state.koRule || 'simple';
+      positionHashes = new Set(state.positionHashes || []);
+      scoringMode = Boolean(state.scoringMode);
+      deadStones = new Set(state.deadStones || []);
+      koRuleSelect.value = koRule;
+    }
+
+    function saveSnapshot() {
+      snapshots.push(getSerializableGameState());
       if (snapshots.length > 400) snapshots.shift();
     }
 
     function restoreSnapshot(snapshot) {
-      board = cloneBoard(snapshot.board);
-      currentPlayer = snapshot.currentPlayer;
-      captures = { ...snapshot.captures };
-      lastMove = snapshot.lastMove ? { ...snapshot.lastMove } : null;
-      previousBoardHash = snapshot.previousBoardHash;
-      lastBoardHash = snapshot.lastBoardHash;
-      passCount = snapshot.passCount;
-      history = snapshot.history.map(m => ({ ...m }));
-      gameOver = snapshot.gameOver;
-      hintPoint = snapshot.hintPoint ? { ...snapshot.hintPoint } : null;
-      lastEstimate = snapshot.lastEstimate ? { ...snapshot.lastEstimate } : null;
-      koRule = snapshot.koRule || 'simple';
-      positionHashes = new Set(snapshot.positionHashes || []);
-      koRuleSelect.value = koRule;
+      applySerializableGameState(snapshot);
+      renderAll();
+    }
+
+
+    function captureReplayFrame() {
+      return getSerializableGameState();
+    }
+
+    function restoreReplayFrame(frame) {
+      applySerializableGameState(frame);
+      renderAll();
+      updateReplayControls();
+    }
+
+    function updateReplayControls() {
+      const enabled = replayMode && replayFrames.length > 0;
+      replayStartBtn.disabled = !enabled || replayIndex <= 0;
+      replayPrevBtn.disabled = !enabled || replayIndex <= 0;
+      replayNextBtn.disabled = !enabled || replayIndex >= replayFrames.length - 1;
+      replayEndBtn.disabled = !enabled || replayIndex >= replayFrames.length - 1;
+      resumePlayBtn.disabled = !enabled;
+      replayIndexLabel.textContent = enabled ? `Replay: ${replayIndex}/${replayFrames.length - 1}` : 'Replay: Off';
+    }
+
+    function jumpReplayTo(index) {
+      if (!replayMode || !replayFrames.length) return;
+      replayIndex = Math.max(0, Math.min(index, replayFrames.length - 1));
+      restoreReplayFrame(replayFrames[replayIndex]);
+    }
+
+    function exitReplayMode() {
+      if (!replayMode) return;
+      replayMode = false;
+      replayFrames = [];
+      replayIndex = 0;
+      analysisReport = null;
+      updateReplayControls();
+      log('Replay mode disabled. You can continue from the current board state.');
       renderAll();
     }
 
@@ -688,7 +990,7 @@
     }
 
     function playMove(x, y, color, opts = {}) {
-      if (gameOver || thinking) return false;
+      if (gameOver || thinking || replayMode || scoringMode) return false;
       const trial = applyMoveToBoard(board, x, y, color);
       if (!trial.legal) {
         if (!opts.silent) log(trial.message);
@@ -710,9 +1012,11 @@
       passCount = 0;
       captures[color] += trial.captured;
       currentPlayer = other(color);
+      resetByoForNextTurn(currentPlayer);
       lastMove = { x, y, color, pass: false };
       hintPoint = null;
       lastEstimate = null;
+      analysisReport = null;
       history.push({
         index: history.length + 1,
         color,
@@ -723,23 +1027,25 @@
       });
       renderAll();
       if (!opts.silent) log(`${colorName(color)} played ${coordLabel(x, y)}${trial.captured ? ` and captured ${trial.captured}` : ''}.`);
-      maybeCpuTurn();
+      if (!suspendAutoTurns) maybeCpuTurn();
       return true;
     }
 
     function passTurn(color, silent = false) {
-      if (gameOver || thinking) return;
+      if (gameOver || thinking || replayMode || scoringMode) return;
       saveSnapshot();
       previousBoardHash = boardHash(board);
       lastBoardHash = previousBoardHash;
       currentPlayer = other(color);
+      resetByoForNextTurn(currentPlayer);
       passCount += 1;
       lastMove = { pass: true, color };
+      analysisReport = null;
       history.push({ index: history.length + 1, color, pass: true, label: 'Pass' });
       renderAll();
       if (!silent) log(`${colorName(color)} passed.`);
-      if (passCount >= 2) finishGameByScoring();
-      else maybeCpuTurn();
+      if (passCount >= 2) enterScoringReview();
+      else if (!suspendAutoTurns) maybeCpuTurn();
     }
 
     function resign(color) {
@@ -747,6 +1053,7 @@
       gameOver = true;
       statusLabel.textContent = `${colorName(other(color))} wins by resignation`;
       log(`${colorName(color)} resigned. ${colorName(other(color))} wins.`);
+      stopClock();
       renderAll();
     }
 
@@ -930,6 +1237,198 @@
       return `(;GM[1]FF[4]CA[UTF-8]AP[GoStudio:Prototype]SZ[${size}]KM[${km}]PB[${pb}]PW[${pw}]RU[Japanese]${moves})`;
     }
 
+
+    function parseSgfText(text) {
+      const clean = String(text || '').replace(/\s+/g, ' ');
+      const sizeMatch = clean.match(/SZ\[(\d+)\]/i);
+      const komiMatch = clean.match(/KM\[([^\]]+)\]/i);
+      const size = Math.max(5, Math.min(25, parseInt(sizeMatch?.[1] || '19', 10) || 19));
+      const komi = Number.parseFloat(komiMatch?.[1] || '6.5');
+      const alpha = 'abcdefghijklmnopqrstuvwxyz';
+      const moves = [];
+      const moveRegex = /;\s*([BW])\[([^\]]*)\]/gi;
+      let match;
+      while ((match = moveRegex.exec(clean)) !== null) {
+        const color = match[1].toUpperCase() === 'B' ? BLACK : WHITE;
+        const coord = (match[2] || '').trim().toLowerCase();
+        if (!coord) {
+          moves.push({ color, pass: true });
+          continue;
+        }
+        if (coord.length < 2) continue;
+        const x = alpha.indexOf(coord[0]);
+        const y = alpha.indexOf(coord[1]);
+        if (x < 0 || y < 0 || x >= size || y >= size) continue;
+        moves.push({ color, x, y, pass: false });
+      }
+      return { size, komi: Number.isFinite(komi) ? komi : 6.5, moves };
+    }
+
+    function importSgfRecord(sgfText) {
+      const parsed = parseSgfText(sgfText);
+      if (!parsed.moves.length) {
+        log('SGF import failed: no moves found.');
+        return;
+      }
+
+      boardSizeSelect.value = String(parsed.size);
+      komiInput.value = String(parsed.komi);
+      playerColorSelect.value = '1';
+      koRuleSelect.value = 'superko';
+
+      replayMode = false;
+      replayFrames = [];
+      replayIndex = 0;
+      resetGame();
+
+      const importedFrames = [captureReplayFrame()];
+      suspendAutoTurns = true;
+      for (const move of parsed.moves) {
+        const applied = move.pass ? (passTurn(move.color, true), true) : playMove(move.x, move.y, move.color, { silent: true });
+        if (!applied) {
+          log(`SGF import stopped at move ${importedFrames.length}: illegal move encountered.`);
+          break;
+        }
+        importedFrames.push(captureReplayFrame());
+      }
+      suspendAutoTurns = false;
+
+      replayMode = true;
+      replayFrames = importedFrames;
+      replayIndex = replayFrames.length - 1;
+      jumpReplayTo(replayIndex);
+      log(`Imported SGF: ${parsed.size}×${parsed.size}, komi ${parsed.komi.toFixed(1)}, ${replayFrames.length - 1} moves.`);
+    }
+
+    function renderAnalysisPanel() {
+      if (!analysisReport) {
+        analysisSummary.textContent = 'Run analysis to see evaluation swings and potential blunders.';
+        analysisList.innerHTML = '';
+        return;
+      }
+      analysisSummary.textContent = analysisReport.summary;
+      analysisList.innerHTML = analysisReport.entries
+        .map((entry) => `<div class="log-entry"><strong>#${entry.index} ${entry.color}</strong> ${entry.label} · swing ${entry.swing} · ${entry.tag}<br/><span class="tiny">${entry.reason}${entry.suggestion ? ` · Suggestion: ${entry.suggestion}` : ''}</span></div>`)
+        .join('');
+    }
+
+    function withEngineContext(temp, fn) {
+      const snapshot = {
+        boardSize,
+        board,
+        history,
+        previousBoardHash,
+        lastBoardHash,
+        positionHashes,
+      };
+      boardSize = temp.boardSize;
+      board = cloneBoard(temp.board);
+      history = temp.history.map((m) => ({ ...m }));
+      previousBoardHash = temp.previousBoardHash;
+      lastBoardHash = temp.lastBoardHash;
+      positionHashes = new Set(temp.positionHashes || []);
+      try {
+        return fn();
+      } finally {
+        boardSize = snapshot.boardSize;
+        board = snapshot.board;
+        history = snapshot.history;
+        previousBoardHash = snapshot.previousBoardHash;
+        lastBoardHash = snapshot.lastBoardHash;
+        positionHashes = snapshot.positionHashes;
+      }
+    }
+
+    function buildAnalysisFrames() {
+      const frames = [{ board: createBoard(boardSize), previousBoardHash: null, positionHashes: new Set([boardHash(createBoard(boardSize))]), captures: { [BLACK]: 0, [WHITE]: 0 }, history: [] }];
+      for (const move of history) {
+        const prev = frames[frames.length - 1];
+        const nextBoard = cloneBoard(prev.board);
+        const nextHashes = new Set(prev.positionHashes);
+        const nextCaptures = { ...prev.captures };
+        let nextPreviousHash = boardHash(prev.board);
+        if (!move.pass) {
+          const trial = applyMoveToBoard(prev.board, move.x, move.y, move.color);
+          if (!trial.legal) break;
+          if (nextPreviousHash && trial.koHash === prev.previousBoardHash) break;
+          if (koRule === 'superko' && prev.positionHashes.has(trial.koHash)) break;
+          for (let y = 0; y < boardSize; y++) {
+            for (let x = 0; x < boardSize; x++) {
+              nextBoard[y][x] = trial.board[y][x];
+            }
+          }
+          nextCaptures[move.color] += trial.captured;
+          nextHashes.add(trial.koHash);
+        }
+        frames.push({
+          board: nextBoard,
+          previousBoardHash: nextPreviousHash,
+          positionHashes: nextHashes,
+          captures: nextCaptures,
+          history: [...prev.history, { ...move }],
+        });
+      }
+      return frames;
+    }
+
+    function runPostGameAnalysis() {
+      if (!history.length) {
+        log('Analysis skipped: no moves to analyze yet.');
+        return;
+      }
+      const frames = buildAnalysisFrames();
+      const entries = [];
+      for (let i = 0; i < Math.min(history.length, frames.length - 1); i++) {
+        const move = history[i];
+        const before = frames[i];
+        const after = frames[i + 1];
+
+        const evalBefore = withEngineContext({ boardSize, board: before.board, history: before.history, previousBoardHash: before.previousBoardHash, lastBoardHash: boardHash(before.board), positionHashes: before.positionHashes }, () => evaluateBoard(before.board, BLACK));
+        const evalAfter = withEngineContext({ boardSize, board: after.board, history: after.history, previousBoardHash: after.previousBoardHash, lastBoardHash: boardHash(after.board), positionHashes: after.positionHashes }, () => evaluateBoard(after.board, BLACK));
+
+        const moverSwing = move.color === BLACK ? (evalAfter - evalBefore) : (evalBefore - evalAfter);
+        const tag = moverSwing < -1.7 ? 'Blunder risk' : moverSwing < -0.65 ? 'Inaccuracy' : moverSwing > 1.0 ? 'Strong move' : 'Stable';
+
+        const suggestion = move.pass
+          ? null
+          : withEngineContext({ boardSize, board: before.board, history: before.history, previousBoardHash: before.previousBoardHash, lastBoardHash: boardHash(before.board), positionHashes: before.positionHashes }, () => {
+              const best = chooseCpuMove(move.color, true);
+              return best ? coordLabel(best.x, best.y) : null;
+            });
+
+        let reason = 'Quiet positional move.';
+        if (move.pass) reason = 'Pass changes initiative and can concede tempo.';
+        else {
+          const trial = applyMoveToBoard(before.board, move.x, move.y, move.color);
+          if (trial.legal) {
+            if (trial.captured > 0) reason = `Captures ${trial.captured} stone${trial.captured > 1 ? 's' : ''}.`;
+            else if (trial.selfGroup.liberties.size <= 2) reason = `Low-liberty shape (${trial.selfGroup.liberties.size} liberties).`;
+            else reason = `Builds shape with ${trial.selfGroup.liberties.size} immediate liberties.`;
+          }
+        }
+
+        entries.push({
+          index: i + 1,
+          color: colorName(move.color),
+          label: move.pass ? 'Pass' : coordLabel(move.x, move.y),
+          swing: moverSwing.toFixed(2),
+          tag,
+          reason,
+          suggestion,
+        });
+      }
+
+      const blunders = entries.filter((e) => e.tag === 'Blunder risk').length;
+      const inaccuracies = entries.filter((e) => e.tag === 'Inaccuracy').length;
+      analysisReport = {
+        summary: `Analyzed ${entries.length} moves · ${blunders} blunder-risk · ${inaccuracies} inaccuracies.`,
+        entries,
+      };
+      renderAnalysisPanel();
+      updateClockSummary();
+      log(`Analysis complete: ${analysisReport.summary}`);
+    }
+
     function ensureCpuWorker() {
       if (cpuWorker) return cpuWorker;
       const workerCode = `
@@ -1111,7 +1610,8 @@
     }
 
     function chooseCpuMoveAsync(color) {
-      if (!useWorkerToggle.checked) return Promise.resolve(chooseCpuMove(color));
+      if (engineMode !== 'heuristic') return Promise.resolve(selectCpuMoveByEngine(color));
+      if (!useWorkerToggle.checked) return Promise.resolve(selectCpuMoveByEngine(color));
       return new Promise((resolve) => {
         const worker = ensureCpuWorker();
         worker.onmessage = (event) => {
@@ -1119,7 +1619,7 @@
           if (!move) resolve(null);
           else {
             const legal = applyMoveToBoard(board, move.x, move.y, color);
-            resolve(legal ? { x: move.x, y: move.y, score: 0 } : chooseCpuMove(color));
+            resolve(legal ? { x: move.x, y: move.y, score: 0 } : selectCpuMoveByEngine(color));
           }
         };
         worker.postMessage({
@@ -1135,9 +1635,165 @@
       });
     }
 
+
+    function runEngineSelfTests() {
+      const failures = [];
+      const successes = [];
+
+      const snapshot = {
+        boardSize,
+        board: cloneBoard(board),
+        currentPlayer,
+        captures: { ...captures },
+        gameOver,
+        lastMove: lastMove ? { ...lastMove } : null,
+        lastBoardHash,
+        previousBoardHash,
+        history: history.map(m => ({ ...m })),
+        snapshots: snapshots.map(s => ({
+          ...s,
+          board: cloneBoard(s.board),
+          captures: { ...s.captures },
+          history: s.history.map(m => ({ ...m })),
+          positionHashes: [...(s.positionHashes || [])],
+        })),
+        passCount,
+        hintPoint: hintPoint ? { ...hintPoint } : null,
+        thinking,
+        lastEstimate: lastEstimate ? { ...lastEstimate } : null,
+        koRule,
+        positionHashes: new Set([...positionHashes]),
+        koRuleSelectValue: koRuleSelect.value,
+      };
+
+      const assert = (condition, label) => {
+        if (condition) successes.push(label);
+        else failures.push(label);
+      };
+
+      const withBoardState = (size, setupFn, testFn) => {
+        boardSize = size;
+        board = createBoard(size);
+        captures = { [BLACK]: 0, [WHITE]: 0 };
+        currentPlayer = BLACK;
+        gameOver = false;
+        passCount = 0;
+        history = [];
+        snapshots = [];
+        hintPoint = null;
+        thinking = false;
+        lastMove = null;
+        previousBoardHash = null;
+        lastBoardHash = boardHash(board);
+        positionHashes = new Set([lastBoardHash]);
+        koRule = 'simple';
+        koRuleSelect.value = 'simple';
+        if (setupFn) setupFn();
+        if (testFn) testFn();
+      };
+
+      try {
+        withBoardState(5, () => {
+          board[0][1] = BLACK;
+          board[1][0] = BLACK;
+          board[1][2] = BLACK;
+          board[1][1] = WHITE;
+          lastBoardHash = boardHash(board);
+          positionHashes = new Set([lastBoardHash]);
+        }, () => {
+          const trial = applyMoveToBoard(board, 1, 2, BLACK);
+          assert(trial.legal, 'Capture setup yields legal move');
+          assert(trial.captured === 1, 'Single-stone capture is counted correctly');
+        });
+
+        withBoardState(5, () => {
+          board[0][1] = BLACK;
+          board[1][0] = BLACK;
+          board[1][2] = BLACK;
+          board[2][1] = BLACK;
+          lastBoardHash = boardHash(board);
+          positionHashes = new Set([lastBoardHash]);
+        }, () => {
+          const trial = applyMoveToBoard(board, 1, 1, WHITE);
+          assert(!trial.legal, 'Suicide is rejected');
+        });
+
+        withBoardState(5, () => {
+          board[0][0] = BLACK;
+          lastBoardHash = boardHash(board);
+          positionHashes = new Set([lastBoardHash]);
+        }, () => {
+          const trial = applyMoveToBoard(board, 1, 1, BLACK);
+          if (trial.legal) {
+            previousBoardHash = trial.koHash;
+            const legal = playMove(1, 1, BLACK, { silent: true });
+            assert(!legal, 'Simple ko prevents immediate repetition hash');
+          } else {
+            assert(false, 'Simple ko test setup produced legal probe move');
+          }
+        });
+
+        withBoardState(5, () => {
+          board[0][0] = BLACK;
+          lastBoardHash = boardHash(board);
+          positionHashes = new Set([lastBoardHash]);
+          koRule = 'superko';
+          koRuleSelect.value = 'superko';
+        }, () => {
+          const trial = applyMoveToBoard(board, 1, 1, BLACK);
+          if (trial.legal) {
+            positionHashes.add(trial.koHash);
+            const legal = playMove(1, 1, BLACK, { silent: true });
+            assert(!legal, 'Positional superko blocks repeated full-board position');
+          } else {
+            assert(false, 'Superko test setup produced legal probe move');
+          }
+        });
+
+        withBoardState(9, null, () => {
+          komiInput.value = '6.5';
+          const terr = estimateTerritory(board);
+          assert(terr[WHITE] === 6.5, 'Territory estimate includes komi baseline for White');
+          assert(terr[BLACK] === 0, 'Territory estimate baseline for Black starts at zero');
+        });
+      } finally {
+        boardSize = snapshot.boardSize;
+        board = cloneBoard(snapshot.board);
+        currentPlayer = snapshot.currentPlayer;
+        captures = { ...snapshot.captures };
+        gameOver = snapshot.gameOver;
+        lastMove = snapshot.lastMove ? { ...snapshot.lastMove } : null;
+        lastBoardHash = snapshot.lastBoardHash;
+        previousBoardHash = snapshot.previousBoardHash;
+        history = snapshot.history.map(m => ({ ...m }));
+        snapshots = snapshot.snapshots.map(s => ({
+          ...s,
+          board: cloneBoard(s.board),
+          captures: { ...s.captures },
+          history: s.history.map(m => ({ ...m })),
+          positionHashes: [...(s.positionHashes || [])],
+        }));
+        passCount = snapshot.passCount;
+        hintPoint = snapshot.hintPoint ? { ...snapshot.hintPoint } : null;
+        thinking = snapshot.thinking;
+        lastEstimate = snapshot.lastEstimate ? { ...snapshot.lastEstimate } : null;
+        koRule = snapshot.koRule;
+        positionHashes = new Set([...snapshot.positionHashes]);
+        koRuleSelect.value = snapshot.koRuleSelectValue;
+        renderAll();
+      }
+
+      if (failures.length) {
+        log(`Engine self-tests: ${successes.length} passed, ${failures.length} failed.`);
+        failures.forEach((failure) => log(`✗ ${failure}`));
+      } else {
+        log(`Engine self-tests: all ${successes.length} passed.`);
+      }
+    }
+
     function maybeCpuTurn() {
       renderAll();
-      if (gameOver || currentPlayer !== cpuColor) return;
+      if (gameOver || scoringMode || currentPlayer !== cpuColor) return;
       thinking = true;
       statusLabel.textContent = 'CPU thinking…';
       setTimeout(async () => {
@@ -1189,16 +1845,104 @@
       return terr;
     }
 
+    function estimateTerritoryWithDeadStones(bd, deadSet) {
+      const cleaned = cloneBoard(bd);
+      const adjustedCaptures = { ...captures };
+      for (const key of deadSet) {
+        const [xRaw, yRaw] = key.split(',');
+        const x = Number(xRaw);
+        const y = Number(yRaw);
+        if (!inside(x, y)) continue;
+        const stone = cleaned[y][x];
+        if (stone === EMPTY) continue;
+        cleaned[y][x] = EMPTY;
+        adjustedCaptures[other(stone)] += 1;
+      }
+
+      const visited = new Set();
+      const terr = { [BLACK]: adjustedCaptures[BLACK], [WHITE]: adjustedCaptures[WHITE] + parseFloat(komiInput.value || '6.5') };
+      for (let y = 0; y < boardSize; y++) {
+        for (let x = 0; x < boardSize; x++) {
+          if (cleaned[y][x] !== EMPTY || visited.has(`${x},${y}`)) continue;
+          const stack = [[x, y]];
+          const region = [];
+          const borderColors = new Set();
+          visited.add(`${x},${y}`);
+          while (stack.length) {
+            const [cx, cy] = stack.pop();
+            region.push([cx, cy]);
+            for (const [nx, ny] of neighbors(cx, cy)) {
+              const v = cleaned[ny][nx];
+              if (v === EMPTY && !visited.has(`${nx},${ny}`)) {
+                visited.add(`${nx},${ny}`);
+                stack.push([nx, ny]);
+              } else if (v !== EMPTY) {
+                borderColors.add(v);
+              }
+            }
+          }
+          if (borderColors.size === 1) {
+            const owner = [...borderColors][0];
+            terr[owner] += region.length;
+          }
+        }
+      }
+      return terr;
+    }
+
+    function enterScoringReview() {
+      scoringMode = true;
+      analysisReport = null;
+      clockState.paused = true;
+      updateClockSummary();
+      deadStones = new Set();
+      lastEstimate = estimateTerritoryWithDeadStones(board, deadStones);
+      statusLabel.textContent = 'Scoring review: mark dead stones';
+      estimateLabel.textContent = `B ${lastEstimate[BLACK].toFixed(1)} · W ${lastEstimate[WHITE].toFixed(1)}`;
+      log('Both players passed. Entered scoring review mode; click stones to mark/unmark dead groups, then finalize score.');
+      renderAll();
+    }
+
+    function cancelScoringReview() {
+      if (!scoringMode) return;
+      scoringMode = false;
+      deadStones = new Set();
+      passCount = 0;
+      clockState.paused = false;
+      clockState.lastTick = Date.now();
+      updateClockSummary();
+      statusLabel.textContent = 'Scoring review canceled';
+      log('Scoring review canceled. Continue play from current position.');
+      renderAll();
+    }
+
+    function toggleDeadStone(x, y) {
+      if (!scoringMode || !inside(x, y) || board[y][x] === EMPTY) return;
+      const info = getGroupAndLiberties(board, x, y);
+      const keys = info.group.map(([gx, gy]) => `${gx},${gy}`);
+      const allMarked = keys.every((k) => deadStones.has(k));
+      for (const key of keys) {
+        if (allMarked) deadStones.delete(key);
+        else deadStones.add(key);
+      }
+      lastEstimate = estimateTerritoryWithDeadStones(board, deadStones);
+      estimateLabel.textContent = `B ${lastEstimate[BLACK].toFixed(1)} · W ${lastEstimate[WHITE].toFixed(1)}`;
+      renderAll();
+    }
+
     function finishGameByScoring() {
+      if (!scoringMode) return;
       gameOver = true;
-      lastEstimate = estimateTerritory(board);
+      scoringMode = false;
+      lastEstimate = estimateTerritoryWithDeadStones(board, deadStones);
       const black = lastEstimate[BLACK];
       const white = lastEstimate[WHITE];
       const diff = Math.abs(black - white).toFixed(1);
       const winner = black > white ? 'Black' : 'White';
       statusLabel.textContent = `${winner} wins by ${diff}`;
       estimateLabel.textContent = `B ${black.toFixed(1)} · W ${white.toFixed(1)}`;
-      log(`Both players passed. Estimated result: Black ${black.toFixed(1)}, White ${white.toFixed(1)}. ${winner} wins by ${diff}.`);
+      log(`Final scoring: Black ${black.toFixed(1)}, White ${white.toFixed(1)}. ${winner} wins by ${diff}.`);
+      deadStones = new Set();
       renderAll();
     }
 
@@ -1249,6 +1993,26 @@
         }
       }
 
+      if (scoringMode && deadStones.size) {
+        ctx.strokeStyle = 'rgba(255, 79, 79, 0.95)';
+        ctx.lineWidth = Math.max(2.2, radius * 0.12);
+        for (const key of deadStones) {
+          const [xRaw, yRaw] = key.split(',');
+          const x = Number(xRaw);
+          const y = Number(yRaw);
+          if (!inside(x, y)) continue;
+          const px = pad + x * cell;
+          const py = pad + y * cell;
+          const mark = radius * 0.62;
+          ctx.beginPath();
+          ctx.moveTo(px - mark, py - mark);
+          ctx.lineTo(px + mark, py + mark);
+          ctx.moveTo(px + mark, py - mark);
+          ctx.lineTo(px - mark, py + mark);
+          ctx.stroke();
+        }
+      }
+
       if (lastMove && !lastMove.pass) {
         const px = pad + lastMove.x * cell;
         const py = pad + lastMove.y * cell;
@@ -1268,6 +2032,16 @@
         ctx.setLineDash([8, 6]);
         ctx.stroke();
         ctx.setLineDash([]);
+      }
+
+      if (cursorPoint && inside(cursorPoint.x, cursorPoint.y)) {
+        const px = pad + cursorPoint.x * cell;
+        const py = pad + cursorPoint.y * cell;
+        ctx.beginPath();
+        ctx.arc(px, py, radius * 0.78, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 255, 120, 0.9)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
       }
 
       boardCanvas.dataset.pad = String(pad);
@@ -1329,7 +2103,7 @@
       turnLabel.textContent = colorName(currentPlayer);
       moveLabel.textContent = String(history.length);
       captureLabel.textContent = `B ${captures[BLACK]} · W ${captures[WHITE]}`;
-      if (!gameOver && !thinking) statusLabel.textContent = currentPlayer === humanColor ? 'Your move' : 'CPU turn';
+      if (!gameOver && !thinking && !scoringMode) statusLabel.textContent = currentPlayer === humanColor ? 'Your move' : 'CPU turn';
       youColorLabel.textContent = colorName(humanColor);
       cpuColorLabel.textContent = colorName(cpuColor);
       lastMoveLabel.textContent = !lastMove ? '—' : (lastMove.pass ? `${colorName(lastMove.color)} pass` : `${colorName(lastMove.color)} ${coordLabel(lastMove.x, lastMove.y)}`);
@@ -1337,14 +2111,23 @@
     }
 
     function renderAll() {
+      const t0 = performance.now();
       renderBoard();
       renderHistory();
       renderStatus();
       renderRankLadder();
-      undoBtn.disabled = snapshots.length === 0 || thinking;
-      passBtn.disabled = gameOver || currentPlayer !== humanColor || thinking;
-      hintBtn.disabled = gameOver || currentPlayer !== humanColor || thinking;
-      resignBtn.disabled = gameOver || thinking;
+      renderAnalysisPanel();
+      updateClockSummary();
+      undoBtn.disabled = snapshots.length === 0 || thinking || replayMode || scoringMode;
+      passBtn.disabled = gameOver || currentPlayer !== humanColor || thinking || replayMode || scoringMode;
+      hintBtn.disabled = gameOver || currentPlayer !== humanColor || thinking || replayMode || scoringMode;
+      resignBtn.disabled = gameOver || thinking || replayMode || scoringMode;
+      finalizeScoreBtn.disabled = !scoringMode || thinking || gameOver;
+      cancelScoringBtn.disabled = !scoringMode || thinking || gameOver;
+      analyzeGameBtn.disabled = thinking || history.length === 0 || scoringMode;
+      updateReplayControls();
+      lastRenderMs = performance.now() - t0;
+      renderPerfLabel.textContent = `${lastRenderMs.toFixed(1)} ms`;
     }
 
     function getCanvasPoint(evt) {
@@ -1361,12 +2144,20 @@
     }
 
     function resetGame() {
+      replayMode = false;
+      replayFrames = [];
+      replayIndex = 0;
+      analysisReport = null;
+      scoringMode = false;
+      deadStones = new Set();
       boardSize = parseInt(boardSizeSelect.value, 10);
       humanColor = parseInt(playerColorSelect.value, 10);
       cpuColor = other(humanColor);
       activeDifficulty = DIFFICULTIES.find(d => d.value === difficultySelect.value) || DIFFICULTIES[4];
+      engineMode = engineModeSelect.value;
       koRule = koRuleSelect.value;
       board = createBoard(boardSize);
+      cursorPoint = { x: Math.floor(boardSize / 2), y: Math.floor(boardSize / 2) };
       currentPlayer = BLACK;
       captures = { [BLACK]: 0, [WHITE]: 0 };
       history = [];
@@ -1380,16 +2171,46 @@
       hintPoint = null;
       thinking = false;
       lastEstimate = null;
+      applyClockSettings();
+      clockState.paused = false;
+      startClock();
       renderAll();
       log(`New ${boardSize}×${boardSize} game started. You are ${colorName(humanColor)}. CPU set to ${activeDifficulty.label}. Rule: ${koRule === 'superko' ? 'positional superko' : 'simple ko'}.`);
       if (cpuColor === BLACK) maybeCpuTurn();
     }
 
     boardCanvas.addEventListener('click', (evt) => {
-      if (gameOver || thinking || currentPlayer !== humanColor) return;
+      if (gameOver || thinking || replayMode) return;
       const { x, y } = getCanvasPoint(evt);
       if (!inside(x, y)) return;
+      cursorPoint = { x, y };
+      if (scoringMode) {
+        toggleDeadStone(x, y);
+        return;
+      }
+      if (currentPlayer !== humanColor) return;
       playMove(x, y, humanColor);
+    });
+
+    window.addEventListener('keydown', (evt) => {
+      const tag = (document.activeElement?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+      const key = evt.key;
+      let moved = false;
+      if (key === 'ArrowUp') { cursorPoint.y = Math.max(0, cursorPoint.y - 1); moved = true; }
+      if (key === 'ArrowDown') { cursorPoint.y = Math.min(boardSize - 1, cursorPoint.y + 1); moved = true; }
+      if (key === 'ArrowLeft') { cursorPoint.x = Math.max(0, cursorPoint.x - 1); moved = true; }
+      if (key === 'ArrowRight') { cursorPoint.x = Math.min(boardSize - 1, cursorPoint.x + 1); moved = true; }
+      if (moved) {
+        evt.preventDefault();
+        renderAll();
+        return;
+      }
+      if ((key === 'Enter' || key === ' ') && !gameOver && !thinking && !replayMode) {
+        evt.preventDefault();
+        if (scoringMode) toggleDeadStone(cursorPoint.x, cursorPoint.y);
+        else if (currentPlayer === humanColor) playMove(cursorPoint.x, cursorPoint.y, humanColor);
+      }
     });
 
     newGameBtn.addEventListener('click', resetGame);
@@ -1402,6 +2223,11 @@
       renderRankLadder();
       log(`CPU difficulty set to ${activeDifficulty.label}.`);
     });
+    engineModeSelect.addEventListener('change', () => {
+      engineMode = engineModeSelect.value;
+      renderRankLadder();
+      log(`Engine mode set to ${engineModeSelect.options[engineModeSelect.selectedIndex]?.text || engineMode}.`);
+    });
     koRuleSelect.addEventListener('change', () => {
       koRule = koRuleSelect.value;
       log(`Ko rule changed to ${koRule === 'superko' ? 'positional superko' : 'simple ko'}. Start a new game to apply cleanly.`);
@@ -1409,6 +2235,20 @@
     useWorkerToggle.addEventListener('change', () => {
       log(`CPU threading: ${useWorkerToggle.checked ? 'Worker enabled' : 'Main thread only'}.`);
     });
+    applyClockBtn.addEventListener('click', () => applyClockSettings());
+    pauseClockBtn.addEventListener('click', () => {
+      clockState.paused = !clockState.paused;
+      clockState.lastTick = Date.now();
+      updateClockSummary();
+      log(`Clock ${clockState.paused ? 'paused' : 'resumed'}.`);
+    });
+    highContrastBtn.addEventListener('click', () => {
+      highContrast = !highContrast;
+      document.body.classList.toggle('high-contrast', highContrast);
+      log(`High contrast ${highContrast ? 'enabled' : 'disabled'}.`);
+      renderAll();
+    });
+    focusBoardBtn.addEventListener('click', () => boardCanvas.focus());
     passBtn.addEventListener('click', () => passTurn(humanColor));
     undoBtn.addEventListener('click', () => {
       if (!snapshots.length || thinking) return;
@@ -1419,7 +2259,7 @@
     });
     hintBtn.addEventListener('click', () => {
       if (gameOver || thinking || currentPlayer !== humanColor) return;
-      const move = chooseCpuMove(humanColor, true);
+      const move = selectCpuMoveByEngine(humanColor, true);
       if (!move) {
         log('No legal hint move found. Passing may be reasonable here.');
         return;
@@ -1429,7 +2269,7 @@
       log(`Hint: consider ${coordLabel(move.x, move.y)}.`);
     });
     estimateBtn.addEventListener('click', () => {
-      lastEstimate = estimateTerritory(board);
+      lastEstimate = scoringMode ? estimateTerritoryWithDeadStones(board, deadStones) : estimateTerritory(board);
       estimateLabel.textContent = `B ${lastEstimate[BLACK].toFixed(1)} · W ${lastEstimate[WHITE].toFixed(1)}`;
       log(`Score estimate updated: Black ${lastEstimate[BLACK].toFixed(1)}, White ${lastEstimate[WHITE].toFixed(1)}.`);
     });
@@ -1463,11 +2303,37 @@
       URL.revokeObjectURL(url);
       log('Exported an SGF game record.');
     });
+
+    importSgfBtn.addEventListener('click', () => importSgfInput.click());
+    importSgfInput.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        importSgfRecord(text);
+      } catch (err) {
+        log(`SGF import failed: ${err?.message || 'unknown error'}.`);
+      } finally {
+        importSgfInput.value = '';
+      }
+    });
     toggleCoordsBtn.addEventListener('click', () => {
       showCoordinates = !showCoordinates;
       renderAll();
     });
     resignBtn.addEventListener('click', () => resign(humanColor));
+    runTestsBtn.addEventListener('click', () => {
+      if (thinking) return;
+      runEngineSelfTests();
+    });
+    finalizeScoreBtn.addEventListener('click', () => finishGameByScoring());
+    cancelScoringBtn.addEventListener('click', () => cancelScoringReview());
+    replayStartBtn.addEventListener('click', () => jumpReplayTo(0));
+    replayPrevBtn.addEventListener('click', () => jumpReplayTo(replayIndex - 1));
+    replayNextBtn.addEventListener('click', () => jumpReplayTo(replayIndex + 1));
+    replayEndBtn.addEventListener('click', () => jumpReplayTo(replayFrames.length - 1));
+    resumePlayBtn.addEventListener('click', () => exitReplayMode());
+    analyzeGameBtn.addEventListener('click', () => runPostGameAnalysis());
 
     function init() {
       populateDifficultyOptions();
@@ -1475,6 +2341,7 @@
       window.addEventListener('resize', renderBoard);
       window.addEventListener('beforeunload', () => {
         if (cpuWorker) cpuWorker.terminate();
+        stopClock();
       });
     }
 
