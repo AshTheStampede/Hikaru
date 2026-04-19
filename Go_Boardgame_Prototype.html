@@ -364,6 +364,19 @@
           <label>Komi
             <input id="komiInput" type="number" value="6.5" step="0.5" min="0" max="20" />
           </label>
+          <label>Ko Rule
+            <select id="koRuleSelect">
+              <option value="simple" selected>Simple ko</option>
+              <option value="superko">Positional superko</option>
+            </select>
+          </label>
+          <label style="justify-content:end;">
+            Engine Threading
+            <span class="badge" style="padding:10px 12px;">
+              <input id="useWorkerToggle" type="checkbox" checked style="width:auto; margin-right:8px;" />
+              Use Worker
+            </span>
+          </label>
         </div>
         <div class="btn-row two">
           <button id="newGameBtn">New Game</button>
@@ -378,9 +391,10 @@
           <button id="undoBtn" class="secondary">Undo</button>
           <button id="hintBtn" class="secondary">Hint</button>
         </div>
-        <div class="btn-row two">
+        <div class="btn-row three">
           <button id="estimateBtn" class="secondary">Estimate Score</button>
           <button id="exportBtn" class="secondary">Export Record</button>
+          <button id="exportSgfBtn" class="secondary">Export SGF</button>
         </div>
         <div class="btn-row two">
           <button id="toggleCoordsBtn" class="secondary">Toggle Coordinates</button>
@@ -481,6 +495,8 @@
     const playerColorSelect = document.getElementById('playerColorSelect');
     const difficultySelect = document.getElementById('difficultySelect');
     const komiInput = document.getElementById('komiInput');
+    const koRuleSelect = document.getElementById('koRuleSelect');
+    const useWorkerToggle = document.getElementById('useWorkerToggle');
     const newGameBtn = document.getElementById('newGameBtn');
     const swapSidesBtn = document.getElementById('swapSidesBtn');
     const passBtn = document.getElementById('passBtn');
@@ -488,6 +504,7 @@
     const hintBtn = document.getElementById('hintBtn');
     const estimateBtn = document.getElementById('estimateBtn');
     const exportBtn = document.getElementById('exportBtn');
+    const exportSgfBtn = document.getElementById('exportSgfBtn');
     const toggleCoordsBtn = document.getElementById('toggleCoordsBtn');
     const resignBtn = document.getElementById('resignBtn');
     const historyBody = document.getElementById('historyBody');
@@ -521,6 +538,9 @@
     let thinking = false;
     let activeDifficulty = DIFFICULTIES[4];
     let lastEstimate = null;
+    let koRule = 'simple';
+    let positionHashes = new Set();
+    let cpuWorker = null;
 
     function populateDifficultyOptions() {
       difficultySelect.innerHTML = DIFFICULTIES.map((d, i) => `<option value="${d.value}" ${i === 4 ? 'selected' : ''}>${d.label}</option>`).join('');
@@ -577,6 +597,8 @@
         gameOver,
         hintPoint: hintPoint ? { ...hintPoint } : null,
         lastEstimate: lastEstimate ? { ...lastEstimate } : null,
+        koRule,
+        positionHashes: [...positionHashes],
       });
       if (snapshots.length > 400) snapshots.shift();
     }
@@ -593,6 +615,9 @@
       gameOver = snapshot.gameOver;
       hintPoint = snapshot.hintPoint ? { ...snapshot.hintPoint } : null;
       lastEstimate = snapshot.lastEstimate ? { ...snapshot.lastEstimate } : null;
+      koRule = snapshot.koRule || 'simple';
+      positionHashes = new Set(snapshot.positionHashes || []);
+      koRuleSelect.value = koRule;
       renderAll();
     }
 
@@ -673,10 +698,15 @@
         if (!opts.silent) log('Illegal due to simple ko.');
         return false;
       }
+      if (koRule === 'superko' && positionHashes.has(trial.koHash)) {
+        if (!opts.silent) log('Illegal due to positional superko.');
+        return false;
+      }
       saveSnapshot();
       previousBoardHash = boardHash(board);
       board = trial.board;
       lastBoardHash = trial.koHash;
+      positionHashes.add(lastBoardHash);
       passCount = 0;
       captures[color] += trial.captured;
       currentPlayer = other(color);
@@ -884,13 +914,234 @@
       return chosenPool[Math.floor(Math.random() * chosenPool.length)] || selected;
     }
 
+    function sgfCoord(x, y) {
+      const alpha = 'abcdefghijklmnopqrstuvwxyz';
+      return `${alpha[x]}${alpha[y]}`;
+    }
+
+    function toSgf() {
+      const size = boardSize;
+      const km = parseFloat(komiInput.value || '6.5').toFixed(1);
+      const pb = humanColor === BLACK ? 'Human' : `CPU ${activeDifficulty.label}`;
+      const pw = humanColor === WHITE ? 'Human' : `CPU ${activeDifficulty.label}`;
+      const moves = history
+        .map(m => `;${m.color === BLACK ? 'B' : 'W'}[${m.pass ? '' : sgfCoord(m.x, m.y)}]`)
+        .join('');
+      return `(;GM[1]FF[4]CA[UTF-8]AP[GoStudio:Prototype]SZ[${size}]KM[${km}]PB[${pb}]PW[${pw}]RU[Japanese]${moves})`;
+    }
+
+    function ensureCpuWorker() {
+      if (cpuWorker) return cpuWorker;
+      const workerCode = `
+        self.onmessage = (event) => {
+          const { board, boardSize, currentPlayer, captures, komi, historyLength, previousBoardHash, difficulty } = event.data;
+          const EMPTY = 0, BLACK = 1, WHITE = 2;
+          const inside = (x, y) => x >= 0 && x < boardSize && y >= 0 && y < boardSize;
+          const other = (c) => c === BLACK ? WHITE : BLACK;
+          const neighbors = (x, y) => [[x+1,y],[x-1,y],[x,y+1],[x,y-1]].filter(([nx,ny]) => inside(nx,ny));
+          const cloneBoard = (bd) => bd.map(r => [...r]);
+          const boardHash = (bd) => bd.map(r => r.join('')).join('|');
+          function getGroupAndLiberties(bd, x, y) {
+            const color = bd[y][x];
+            if (color === EMPTY) return { group: [], liberties: new Set() };
+            const stack = [[x,y]], seen = new Set([\`\${x},\${y}\`]), group = [], liberties = new Set();
+            while (stack.length) {
+              const [cx, cy] = stack.pop();
+              group.push([cx, cy]);
+              for (const [nx, ny] of neighbors(cx, cy)) {
+                const v = bd[ny][nx];
+                if (v === EMPTY) liberties.add(\`\${nx},\${ny}\`);
+                else if (v === color && !seen.has(\`\${nx},\${ny}\`)) { seen.add(\`\${nx},\${ny}\`); stack.push([nx, ny]); }
+              }
+            }
+            return { group, liberties };
+          }
+          function removeGroup(bd, group) { for (const [x, y] of group) bd[y][x] = EMPTY; }
+          function applyMoveToBoard(bd, x, y, color) {
+            if (!inside(x, y) || bd[y][x] !== EMPTY) return null;
+            const newBoard = cloneBoard(bd);
+            newBoard[y][x] = color;
+            let captured = 0;
+            const opp = other(color);
+            for (const [nx, ny] of neighbors(x, y)) {
+              if (newBoard[ny][nx] === opp) {
+                const info = getGroupAndLiberties(newBoard, nx, ny);
+                if (info.liberties.size === 0) { captured += info.group.length; removeGroup(newBoard, info.group); }
+              }
+            }
+            const selfInfo = getGroupAndLiberties(newBoard, x, y);
+            if (selfInfo.liberties.size === 0) return null;
+            return { board: newBoard, captured, selfGroup: selfInfo, hash: boardHash(newBoard) };
+          }
+          function hasNearbyStone(bd, x, y, radius = 2) {
+            for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              const nx = x + dx, ny = y + dy;
+              if (inside(nx, ny) && bd[ny][nx] !== EMPTY) return true;
+            }
+            return false;
+          }
+          function countAdjacentColors(bd, x, y) {
+            let black = 0, white = 0, empty = 0;
+            for (const [nx, ny] of neighbors(x, y)) {
+              const v = bd[ny][nx];
+              if (v === BLACK) black++;
+              else if (v === WHITE) white++;
+              else empty++;
+            }
+            return { black, white, empty };
+          }
+          function isEyeLike(bd, x, y, color) {
+            if (bd[y][x] !== EMPTY) return false;
+            for (const [nx, ny] of neighbors(x, y)) if (bd[ny][nx] !== color) return false;
+            return true;
+          }
+          function staticMoveScore(bd, x, y, color, trial) {
+            const center = (boardSize - 1) / 2;
+            const dist = Math.abs(x - center) + Math.abs(y - center);
+            const normCenter = 1 - (dist / (boardSize - 1));
+            const adj = countAdjacentColors(bd, x, y);
+            const libs = trial.selfGroup.liberties.size;
+            let atariTargets = 0, savedGroups = 0;
+            for (const [nx, ny] of neighbors(x, y)) {
+              if (bd[ny][nx] === other(color)) {
+                const info = getGroupAndLiberties(bd, nx, ny);
+                if (info.liberties.size === 1) atariTargets += info.group.length;
+              } else if (bd[ny][nx] === color) {
+                const info = getGroupAndLiberties(bd, nx, ny);
+                if (info.liberties.size === 1) savedGroups += info.group.length;
+              }
+            }
+            const eyePenalty = isEyeLike(bd, x, y, color) ? 2.4 : 0;
+            const selfAtariPenalty = libs <= 1 ? 3.5 : libs === 2 ? 0.8 : 0;
+            const connectionBonus = adj[color === BLACK ? 'black' : 'white'] * 0.9;
+            const attackBonus = adj[color === BLACK ? 'white' : 'black'] * 0.55;
+            const captureBonus = trial.captured * 5.2 * difficulty.tactical;
+            const saveBonus = savedGroups * 2.5 * difficulty.tactical;
+            const atariBonus = atariTargets * 1.35 * difficulty.tactical;
+            const libertyBonus = Math.min(libs, 5) * 0.75;
+            const territoryBias = normCenter * (historyLength < boardSize * 2 ? 1.4 : 0.3) + (hasNearbyStone(bd, x, y, 1) ? 0.7 : 0);
+            let shapeBonus = 0;
+            if (adj.empty <= 1) shapeBonus -= 1.1;
+            if (adj.empty >= 3) shapeBonus += 0.35;
+            if ((x === 3 || x === boardSize - 4) && (y === 3 || y === boardSize - 4) && boardSize >= 13) shapeBonus += 1.0;
+            if ((x === 2 || x === boardSize - 3) && (y === 2 || y === boardSize - 3) && boardSize === 9) shapeBonus += 0.7;
+            return captureBonus + saveBonus + atariBonus + libertyBonus + connectionBonus + attackBonus + shapeBonus + territoryBias * difficulty.territory - eyePenalty - selfAtariPenalty;
+          }
+          function estimateTerritory(bd) {
+            const visited = new Set();
+            const terr = { [BLACK]: captures[BLACK], [WHITE]: captures[WHITE] + komi };
+            for (let y = 0; y < boardSize; y++) for (let x = 0; x < boardSize; x++) {
+              if (bd[y][x] !== EMPTY || visited.has(\`\${x},\${y}\`)) continue;
+              const stack = [[x,y]], region = [], borderColors = new Set();
+              visited.add(\`\${x},\${y}\`);
+              while (stack.length) {
+                const [cx, cy] = stack.pop();
+                region.push([cx,cy]);
+                for (const [nx, ny] of neighbors(cx, cy)) {
+                  const v = bd[ny][nx];
+                  if (v === EMPTY && !visited.has(\`\${nx},\${ny}\`)) { visited.add(\`\${nx},\${ny}\`); stack.push([nx,ny]); }
+                  else if (v !== EMPTY) borderColors.add(v);
+                }
+              }
+              if (borderColors.size === 1) terr[[...borderColors][0]] += region.length;
+            }
+            return terr;
+          }
+          function evaluateBoard(bd, color) {
+            const opp = other(color);
+            let myStones = 0, oppStones = 0, myLibs = 0, oppLibs = 0;
+            const seen = new Set();
+            for (let y = 0; y < boardSize; y++) for (let x = 0; x < boardSize; x++) {
+              const v = bd[y][x];
+              if (v === EMPTY) continue;
+              if (v === color) myStones++;
+              if (v === opp) oppStones++;
+              const key = \`\${x},\${y}\`;
+              if (!seen.has(key)) {
+                const info = getGroupAndLiberties(bd, x, y);
+                info.group.forEach(([gx, gy]) => seen.add(\`\${gx},\${gy}\`));
+                if (v === color) myLibs += info.liberties.size + info.group.length * 0.15;
+                else oppLibs += info.liberties.size + info.group.length * 0.15;
+              }
+            }
+            const terr = estimateTerritory(bd);
+            return (myStones - oppStones) * 0.18 + (myLibs - oppLibs) * 0.82 + (terr[color] - terr[opp]) * 1.3;
+          }
+          function candidateMoves(bd, color) {
+            const out = [];
+            const openingPhase = historyLength < Math.max(10, boardSize);
+            for (let y = 0; y < boardSize; y++) for (let x = 0; x < boardSize; x++) {
+              if (bd[y][x] !== EMPTY) continue;
+              if (!openingPhase && !hasNearbyStone(bd, x, y, boardSize === 19 ? 2 : 1)) continue;
+              const trial = applyMoveToBoard(bd, x, y, color);
+              if (!trial) continue;
+              if (previousBoardHash && trial.hash === previousBoardHash) continue;
+              out.push({ x, y, score: staticMoveScore(bd, x, y, color, trial), board: trial.board });
+            }
+            out.sort((a,b) => b.score - a.score);
+            return out.slice(0, Math.min(out.length, difficulty.beam + (boardSize === 19 ? 6 : 0)));
+          }
+          function negamax(bd, color, depth, alpha, beta) {
+            const cands = candidateMoves(bd, color);
+            if (depth === 0 || !cands.length) return { score: evaluateBoard(bd, color) };
+            let best = -Infinity;
+            for (const cand of cands) {
+              const score = -negamax(cand.board, other(color), depth - 1, -beta, -alpha).score + cand.score * 0.15;
+              best = Math.max(best, score);
+              alpha = Math.max(alpha, score);
+              if (alpha >= beta) break;
+            }
+            return { score: best };
+          }
+          const candidates = candidateMoves(board, currentPlayer);
+          if (!candidates.length) return self.postMessage({ move: null });
+          const top = candidates.slice(0, Math.min(candidates.length, Math.max(5, difficulty.beam)));
+          let bestMove = top[0], bestScore = -Infinity;
+          for (const cand of top) {
+            const score = difficulty.depth > 0 ? -negamax(cand.board, other(currentPlayer), difficulty.depth - 1, -Infinity, Infinity).score + cand.score * 0.2 : cand.score;
+            if (score > bestScore) { bestScore = score; bestMove = cand; }
+          }
+          self.postMessage({ move: { x: bestMove.x, y: bestMove.y } });
+        };
+      `;
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      cpuWorker = new Worker(URL.createObjectURL(blob));
+      return cpuWorker;
+    }
+
+    function chooseCpuMoveAsync(color) {
+      if (!useWorkerToggle.checked) return Promise.resolve(chooseCpuMove(color));
+      return new Promise((resolve) => {
+        const worker = ensureCpuWorker();
+        worker.onmessage = (event) => {
+          const move = event.data.move;
+          if (!move) resolve(null);
+          else {
+            const legal = applyMoveToBoard(board, move.x, move.y, color);
+            resolve(legal ? { x: move.x, y: move.y, score: 0 } : chooseCpuMove(color));
+          }
+        };
+        worker.postMessage({
+          board: cloneBoard(board),
+          boardSize,
+          currentPlayer: color,
+          captures: { ...captures },
+          komi: parseFloat(komiInput.value || '6.5'),
+          historyLength: history.length,
+          previousBoardHash,
+          difficulty: activeDifficulty,
+        });
+      });
+    }
+
     function maybeCpuTurn() {
       renderAll();
       if (gameOver || currentPlayer !== cpuColor) return;
       thinking = true;
       statusLabel.textContent = 'CPU thinking…';
-      setTimeout(() => {
-        const move = chooseCpuMove(cpuColor);
+      setTimeout(async () => {
+        const move = await chooseCpuMoveAsync(cpuColor);
         thinking = false;
         if (!move) {
           passTurn(cpuColor);
@@ -1114,6 +1365,7 @@
       humanColor = parseInt(playerColorSelect.value, 10);
       cpuColor = other(humanColor);
       activeDifficulty = DIFFICULTIES.find(d => d.value === difficultySelect.value) || DIFFICULTIES[4];
+      koRule = koRuleSelect.value;
       board = createBoard(boardSize);
       currentPlayer = BLACK;
       captures = { [BLACK]: 0, [WHITE]: 0 };
@@ -1121,6 +1373,7 @@
       snapshots = [];
       previousBoardHash = null;
       lastBoardHash = boardHash(board);
+      positionHashes = new Set([lastBoardHash]);
       lastMove = null;
       passCount = 0;
       gameOver = false;
@@ -1128,7 +1381,7 @@
       thinking = false;
       lastEstimate = null;
       renderAll();
-      log(`New ${boardSize}×${boardSize} game started. You are ${colorName(humanColor)}. CPU set to ${activeDifficulty.label}.`);
+      log(`New ${boardSize}×${boardSize} game started. You are ${colorName(humanColor)}. CPU set to ${activeDifficulty.label}. Rule: ${koRule === 'superko' ? 'positional superko' : 'simple ko'}.`);
       if (cpuColor === BLACK) maybeCpuTurn();
     }
 
@@ -1148,6 +1401,13 @@
       activeDifficulty = DIFFICULTIES.find(d => d.value === difficultySelect.value) || DIFFICULTIES[4];
       renderRankLadder();
       log(`CPU difficulty set to ${activeDifficulty.label}.`);
+    });
+    koRuleSelect.addEventListener('change', () => {
+      koRule = koRuleSelect.value;
+      log(`Ko rule changed to ${koRule === 'superko' ? 'positional superko' : 'simple ko'}. Start a new game to apply cleanly.`);
+    });
+    useWorkerToggle.addEventListener('change', () => {
+      log(`CPU threading: ${useWorkerToggle.checked ? 'Worker enabled' : 'Main thread only'}.`);
     });
     passBtn.addEventListener('click', () => passTurn(humanColor));
     undoBtn.addEventListener('click', () => {
@@ -1192,6 +1452,17 @@
       URL.revokeObjectURL(url);
       log('Exported a JSON game record.');
     });
+    exportSgfBtn.addEventListener('click', () => {
+      const sgf = toSgf();
+      const blob = new Blob([sgf], { type: 'application/x-go-sgf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `go-studio-record-${boardSize}x${boardSize}.sgf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      log('Exported an SGF game record.');
+    });
     toggleCoordsBtn.addEventListener('click', () => {
       showCoordinates = !showCoordinates;
       renderAll();
@@ -1202,6 +1473,9 @@
       populateDifficultyOptions();
       resetGame();
       window.addEventListener('resize', renderBoard);
+      window.addEventListener('beforeunload', () => {
+        if (cpuWorker) cpuWorker.terminate();
+      });
     }
 
     init();
