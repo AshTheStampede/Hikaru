@@ -376,6 +376,7 @@
               <option value="heuristic" selected>Heuristic (Baseline)</option>
               <option value="balanced">Balanced Search</option>
               <option value="aggressive">Aggressive Tactical</option>
+              <option value="mcts-lite">MCTS Lite (Experimental)</option>
             </select>
           </label>
           <label>Komi
@@ -807,6 +808,7 @@
 
     function selectCpuMoveByEngine(color, forHint = false) {
       if (engineMode === 'heuristic') return chooseCpuMove(color, forHint);
+      if (engineMode === 'mcts-lite') return chooseCpuMoveMctsLite(color, forHint);
       const base = chooseCpuMove(color, forHint);
       const cands = candidateMoves(board, color, activeDifficulty);
       if (!cands.length) return base;
@@ -819,6 +821,44 @@
         return attack || base;
       }
       return base;
+    }
+
+    function chooseCpuMoveMctsLite(color, forHint = false) {
+      const candidates = candidateMoves(board, color, activeDifficulty);
+      if (!candidates.length) return null;
+      const top = candidates.slice(0, Math.min(candidates.length, 8));
+      const rollouts = forHint ? 5 : 10;
+      const plies = forHint ? 6 : 10;
+      let best = top[0];
+      let bestScore = -Infinity;
+
+      for (const cand of top) {
+        let total = 0;
+        for (let i = 0; i < rollouts; i++) {
+          const simBoard = cloneBoard(cand.board);
+          let simColor = other(color);
+          let depth = plies;
+          while (depth > 0) {
+            const simMoves = candidateMoves(simBoard, simColor, activeDifficulty);
+            if (!simMoves.length) break;
+            const pick = simMoves[Math.floor(Math.random() * Math.min(simMoves.length, 4))];
+            for (let y = 0; y < boardSize; y++) {
+              for (let x = 0; x < boardSize; x++) {
+                simBoard[y][x] = pick.board[y][x];
+              }
+            }
+            simColor = other(simColor);
+            depth -= 1;
+          }
+          total += evaluateBoard(simBoard, color);
+        }
+        const avg = total / rollouts + cand.score * 0.12;
+        if (avg > bestScore) {
+          bestScore = avg;
+          best = cand;
+        }
+      }
+      return best;
     }
 
     function log(message) {
@@ -1509,7 +1549,7 @@
       if (cpuWorker) return cpuWorker;
       const workerCode = `
         self.onmessage = (event) => {
-          const { board, boardSize, currentPlayer, captures, komi, historyLength, previousBoardHash, difficulty } = event.data;
+          const { board, boardSize, currentPlayer, captures, komi, historyLength, previousBoardHash, difficulty, engineMode } = event.data;
           const EMPTY = 0, BLACK = 1, WHITE = 2;
           const inside = (x, y) => x >= 0 && x < boardSize && y >= 0 && y < boardSize;
           const other = (c) => c === BLACK ? WHITE : BLACK;
@@ -1657,6 +1697,34 @@
             out.sort((a,b) => b.score - a.score);
             return out.slice(0, Math.min(out.length, difficulty.beam + (boardSize === 19 ? 6 : 0)));
           }
+          function chooseMctsLite(color) {
+            const candidates = candidateMoves(board, color);
+            if (!candidates.length) return null;
+            const top = candidates.slice(0, Math.min(candidates.length, 8));
+            let best = top[0], bestScore = -Infinity;
+            const rollouts = 10;
+            const plies = 10;
+            for (const cand of top) {
+              let total = 0;
+              for (let i = 0; i < rollouts; i++) {
+                const simBoard = cloneBoard(cand.board);
+                let simColor = other(color);
+                let depth = plies;
+                while (depth > 0) {
+                  const sim = candidateMoves(simBoard, simColor);
+                  if (!sim.length) break;
+                  const pick = sim[Math.floor(Math.random() * Math.min(sim.length, 4))];
+                  for (let y = 0; y < boardSize; y++) for (let x = 0; x < boardSize; x++) simBoard[y][x] = pick.board[y][x];
+                  simColor = other(simColor);
+                  depth--;
+                }
+                total += evaluateBoard(simBoard, color);
+              }
+              const avg = total / rollouts + cand.score * 0.12;
+              if (avg > bestScore) { bestScore = avg; best = cand; }
+            }
+            return best;
+          }
           function negamax(bd, color, depth, alpha, beta) {
             const cands = candidateMoves(bd, color);
             if (depth === 0 || !cands.length) return { score: evaluateBoard(bd, color) };
@@ -1668,6 +1736,10 @@
               if (alpha >= beta) break;
             }
             return { score: best };
+          }
+          if (engineMode === 'mcts-lite') {
+            const move = chooseMctsLite(currentPlayer);
+            return self.postMessage({ move: move ? { x: move.x, y: move.y } : null });
           }
           const candidates = candidateMoves(board, currentPlayer);
           if (!candidates.length) return self.postMessage({ move: null });
@@ -1686,7 +1758,6 @@
     }
 
     function chooseCpuMoveAsync(color) {
-      if (engineMode !== 'heuristic') return Promise.resolve(selectCpuMoveByEngine(color));
       if (!useWorkerToggle.checked) return Promise.resolve(selectCpuMoveByEngine(color));
       return new Promise((resolve) => {
         const worker = ensureCpuWorker();
@@ -1706,6 +1777,7 @@
           komi: parseFloat(komiInput.value || '6.5'),
           historyLength: history.length,
           previousBoardHash,
+          engineMode,
           difficulty: activeDifficulty,
         });
       });
