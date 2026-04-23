@@ -475,6 +475,7 @@
         <div class="metric"><div class="label">Captures</div><div class="value" id="captureLabel">B 0 · W 0</div></div>
         <div class="metric"><div class="label">Status</div><div class="value" id="statusLabel">Ready</div></div>
         <div class="metric"><div class="label">Render</div><div class="value" id="renderPerfLabel">0 ms</div></div>
+        <div class="metric"><div class="label">Engine</div><div class="value" id="enginePerfLabel">0 ms</div></div>
       </div>
 
       <div class="board-wrap">
@@ -618,6 +619,7 @@
     const captureLabel = document.getElementById('captureLabel');
     const statusLabel = document.getElementById('statusLabel');
     const renderPerfLabel = document.getElementById('renderPerfLabel');
+    const enginePerfLabel = document.getElementById('enginePerfLabel');
     const youColorLabel = document.getElementById('youColorLabel');
     const cpuColorLabel = document.getElementById('cpuColorLabel');
     const lastMoveLabel = document.getElementById('lastMoveLabel');
@@ -657,6 +659,9 @@
     let cursorPoint = { x: 9, y: 9 };
     let highContrast = false;
     let lastRenderMs = 0;
+    let renderSamples = [];
+    let lastCpuThinkMs = 0;
+    let cpuThinkSamples = [];
     let clockState = {
       enabled: true,
       paused: false,
@@ -679,6 +684,16 @@
     function renderRankLadder() {
       rankLadder.innerHTML = DIFFICULTIES.map(d => `<span class="chip ${d.value === activeDifficulty.value ? 'active' : ''}">${d.label}</span>`).join('');
       rankDescription.textContent = `${activeDifficulty.desc} · Engine: ${engineModeSelect.options[engineModeSelect.selectedIndex]?.text || engineMode}`;
+    }
+
+    function recordPerfSample(samples, value, max = 30) {
+      samples.push(value);
+      if (samples.length > max) samples.shift();
+    }
+
+    function averagePerf(samples) {
+      if (!samples.length) return 0;
+      return samples.reduce((sum, n) => sum + n, 0) / samples.length;
     }
 
     function formatClock(ms) {
@@ -1639,6 +1654,7 @@
     function runEngineSelfTests() {
       const failures = [];
       const successes = [];
+      const testTimings = [];
 
       const snapshot = {
         boardSize,
@@ -1672,6 +1688,7 @@
       };
 
       const withBoardState = (size, setupFn, testFn) => {
+        const t0 = performance.now();
         boardSize = size;
         board = createBoard(size);
         captures = { [BLACK]: 0, [WHITE]: 0 };
@@ -1690,6 +1707,7 @@
         koRuleSelect.value = 'simple';
         if (setupFn) setupFn();
         if (testFn) testFn();
+        testTimings.push(performance.now() - t0);
       };
 
       try {
@@ -1756,6 +1774,20 @@
           assert(terr[WHITE] === 6.5, 'Territory estimate includes komi baseline for White');
           assert(terr[BLACK] === 0, 'Territory estimate baseline for Black starts at zero');
         });
+
+        withBoardState(5, null, () => {
+          passTurn(BLACK, true);
+          passTurn(WHITE, true);
+          assert(scoringMode, 'Two consecutive passes enter scoring review');
+        });
+
+        withBoardState(9, null, () => {
+          playMove(2, 2, BLACK, { silent: true });
+          playMove(6, 6, WHITE, { silent: true });
+          const best = chooseCpuMove(BLACK, true);
+          assert(Boolean(best), 'Deterministic tactical regression returns a legal candidate');
+          assert(inside(best.x, best.y), 'Regression candidate coordinate is in-bounds');
+        });
       } finally {
         boardSize = snapshot.boardSize;
         board = cloneBoard(snapshot.board);
@@ -1783,11 +1815,12 @@
         renderAll();
       }
 
+      const avgTestMs = averagePerf(testTimings);
       if (failures.length) {
-        log(`Engine self-tests: ${successes.length} passed, ${failures.length} failed.`);
+        log(`Engine self-tests: ${successes.length} passed, ${failures.length} failed (avg ${avgTestMs.toFixed(2)} ms).`);
         failures.forEach((failure) => log(`✗ ${failure}`));
       } else {
-        log(`Engine self-tests: all ${successes.length} passed.`);
+        log(`Engine self-tests: all ${successes.length} passed (avg ${avgTestMs.toFixed(2)} ms).`);
       }
     }
 
@@ -1797,7 +1830,10 @@
       thinking = true;
       statusLabel.textContent = 'CPU thinking…';
       setTimeout(async () => {
+        const thinkStart = performance.now();
         const move = await chooseCpuMoveAsync(cpuColor);
+        lastCpuThinkMs = performance.now() - thinkStart;
+        recordPerfSample(cpuThinkSamples, lastCpuThinkMs);
         thinking = false;
         if (!move) {
           passTurn(cpuColor);
@@ -2127,7 +2163,9 @@
       analyzeGameBtn.disabled = thinking || history.length === 0 || scoringMode;
       updateReplayControls();
       lastRenderMs = performance.now() - t0;
-      renderPerfLabel.textContent = `${lastRenderMs.toFixed(1)} ms`;
+      recordPerfSample(renderSamples, lastRenderMs);
+      renderPerfLabel.textContent = `${lastRenderMs.toFixed(1)} ms · avg ${averagePerf(renderSamples).toFixed(1)}`;
+      enginePerfLabel.textContent = `${lastCpuThinkMs.toFixed(1)} ms · avg ${averagePerf(cpuThinkSamples).toFixed(1)}`;
     }
 
     function getCanvasPoint(evt) {
