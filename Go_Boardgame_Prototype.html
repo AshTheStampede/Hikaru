@@ -385,6 +385,7 @@
             <select id="koRuleSelect">
               <option value="simple" selected>Simple ko</option>
               <option value="superko">Positional superko</option>
+              <option value="situational-superko">Situational superko</option>
             </select>
           </label>
           <label style="justify-content:end;">
@@ -648,6 +649,7 @@
     let lastEstimate = null;
     let koRule = 'simple';
     let positionHashes = new Set();
+    let situationalHashes = new Set();
     let cpuWorker = null;
     let replayMode = false;
     let replayFrames = [];
@@ -851,6 +853,10 @@
       return bd.map(row => row.join('')).join('|');
     }
 
+    function situationalHash(positionHash, toPlay) {
+      return `${positionHash}::${toPlay}`;
+    }
+
     function getSerializableGameState() {
       return {
         board: cloneBoard(board),
@@ -866,6 +872,7 @@
         lastEstimate: lastEstimate ? { ...lastEstimate } : null,
         koRule,
         positionHashes: [...positionHashes],
+        situationalHashes: [...situationalHashes],
         scoringMode,
         deadStones: [...deadStones],
       };
@@ -885,6 +892,8 @@
       lastEstimate = state.lastEstimate ? { ...state.lastEstimate } : null;
       koRule = state.koRule || 'simple';
       positionHashes = new Set(state.positionHashes || []);
+      situationalHashes = new Set(state.situationalHashes || []);
+      if (!situationalHashes.size && lastBoardHash) situationalHashes.add(situationalHash(lastBoardHash, currentPlayer));
       scoringMode = Boolean(state.scoringMode);
       deadStones = new Set(state.deadStones || []);
       koRuleSelect.value = koRule;
@@ -1019,14 +1028,20 @@
         if (!opts.silent) log('Illegal due to positional superko.');
         return false;
       }
+      const nextPlayer = other(color);
+      if (koRule === 'situational-superko' && situationalHashes.has(situationalHash(trial.koHash, nextPlayer))) {
+        if (!opts.silent) log('Illegal due to situational superko.');
+        return false;
+      }
       saveSnapshot();
       previousBoardHash = boardHash(board);
       board = trial.board;
       lastBoardHash = trial.koHash;
       positionHashes.add(lastBoardHash);
+      situationalHashes.add(situationalHash(lastBoardHash, nextPlayer));
       passCount = 0;
       captures[color] += trial.captured;
-      currentPlayer = other(color);
+      currentPlayer = nextPlayer;
       resetByoForNextTurn(currentPlayer);
       lastMove = { x, y, color, pass: false };
       hintPoint = null;
@@ -1054,6 +1069,8 @@
       currentPlayer = other(color);
       resetByoForNextTurn(currentPlayer);
       passCount += 1;
+      positionHashes.add(lastBoardHash);
+      situationalHashes.add(situationalHash(lastBoardHash, currentPlayer));
       lastMove = { pass: true, color };
       analysisReport = null;
       history.push({ index: history.length + 1, color, pass: true, label: 'Pass' });
@@ -1244,12 +1261,15 @@
     function toSgf() {
       const size = boardSize;
       const km = parseFloat(komiInput.value || '6.5').toFixed(1);
+      const tm = Math.max(0, Number(blackMainTimeInput.value || 0));
+      const ot = `${Math.max(0, Number(byoYomiPeriodsInput.value || 0))}x${Math.max(0, Number(byoYomiSecondsInput.value || 0))} byo-yomi`;
       const pb = humanColor === BLACK ? 'Human' : `CPU ${activeDifficulty.label}`;
       const pw = humanColor === WHITE ? 'Human' : `CPU ${activeDifficulty.label}`;
       const moves = history
         .map(m => `;${m.color === BLACK ? 'B' : 'W'}[${m.pass ? '' : sgfCoord(m.x, m.y)}]`)
         .join('');
-      return `(;GM[1]FF[4]CA[UTF-8]AP[GoStudio:Prototype]SZ[${size}]KM[${km}]PB[${pb}]PW[${pw}]RU[Japanese]${moves})`;
+      const koProp = koRule === 'simple' ? 'KO[Simple]' : koRule === 'superko' ? 'KO[PositionalSuperko]' : 'KO[SituationalSuperko]';
+      return `(;GM[1]FF[4]CA[UTF-8]AP[GoStudio:Prototype]SZ[${size}]KM[${km}]PB[${pb}]PW[${pw}]RU[Japanese]TM[${tm}]OT[${ot}]${koProp}${moves})`;
     }
 
 
@@ -1257,8 +1277,18 @@
       const clean = String(text || '').replace(/\s+/g, ' ');
       const sizeMatch = clean.match(/SZ\[(\d+)\]/i);
       const komiMatch = clean.match(/KM\[([^\]]+)\]/i);
+      const koMatch = clean.match(/KO\[([^\]]+)\]/i);
+      const tmMatch = clean.match(/TM\[([^\]]+)\]/i);
+      const otMatch = clean.match(/OT\[([^\]]+)\]/i);
       const size = Math.max(5, Math.min(25, parseInt(sizeMatch?.[1] || '19', 10) || 19));
       const komi = Number.parseFloat(komiMatch?.[1] || '6.5');
+      const mainMinutes = Math.max(0, Number.parseFloat(tmMatch?.[1] || '0'));
+      const otRaw = (otMatch?.[1] || '').toLowerCase();
+      const otParsed = otRaw.match(/(\d+)\s*x\s*(\d+)/);
+      const byoPeriods = otParsed ? Math.max(0, Number.parseInt(otParsed[1], 10)) : 0;
+      const byoSeconds = otParsed ? Math.max(0, Number.parseInt(otParsed[2], 10)) : 0;
+      const koRaw = (koMatch?.[1] || '').toLowerCase();
+      const parsedKoRule = koRaw.includes('situational') ? 'situational-superko' : koRaw.includes('positional') || koRaw.includes('superko') ? 'superko' : 'simple';
       const alpha = 'abcdefghijklmnopqrstuvwxyz';
       const moves = [];
       const moveRegex = /;\s*([BW])\[([^\]]*)\]/gi;
@@ -1276,7 +1306,15 @@
         if (x < 0 || y < 0 || x >= size || y >= size) continue;
         moves.push({ color, x, y, pass: false });
       }
-      return { size, komi: Number.isFinite(komi) ? komi : 6.5, moves };
+      return {
+        size,
+        komi: Number.isFinite(komi) ? komi : 6.5,
+        koRule: parsedKoRule,
+        mainMinutes,
+        byoSeconds,
+        byoPeriods,
+        moves,
+      };
     }
 
     function importSgfRecord(sgfText) {
@@ -1289,7 +1327,12 @@
       boardSizeSelect.value = String(parsed.size);
       komiInput.value = String(parsed.komi);
       playerColorSelect.value = '1';
-      koRuleSelect.value = 'superko';
+      koRuleSelect.value = parsed.koRule || 'superko';
+      koRule = koRuleSelect.value;
+      blackMainTimeInput.value = String(parsed.mainMinutes || 0);
+      whiteMainTimeInput.value = String(parsed.mainMinutes || 0);
+      byoYomiSecondsInput.value = String(parsed.byoSeconds || 0);
+      byoYomiPeriodsInput.value = String(parsed.byoPeriods || 0);
 
       replayMode = false;
       replayFrames = [];
@@ -1312,7 +1355,7 @@
       replayFrames = importedFrames;
       replayIndex = replayFrames.length - 1;
       jumpReplayTo(replayIndex);
-      log(`Imported SGF: ${parsed.size}×${parsed.size}, komi ${parsed.komi.toFixed(1)}, ${replayFrames.length - 1} moves.`);
+      log(`Imported SGF: ${parsed.size}×${parsed.size}, komi ${parsed.komi.toFixed(1)}, rule ${parsed.koRule}, ${replayFrames.length - 1} moves.`);
     }
 
     function renderAnalysisPanel() {
@@ -1335,6 +1378,7 @@
         previousBoardHash,
         lastBoardHash,
         positionHashes,
+        situationalHashes,
       };
       boardSize = temp.boardSize;
       board = cloneBoard(temp.board);
@@ -1342,6 +1386,7 @@
       previousBoardHash = temp.previousBoardHash;
       lastBoardHash = temp.lastBoardHash;
       positionHashes = new Set(temp.positionHashes || []);
+      situationalHashes = new Set(temp.situationalHashes || []);
       try {
         return fn();
       } finally {
@@ -1351,15 +1396,26 @@
         previousBoardHash = snapshot.previousBoardHash;
         lastBoardHash = snapshot.lastBoardHash;
         positionHashes = snapshot.positionHashes;
+        situationalHashes = snapshot.situationalHashes;
       }
     }
 
     function buildAnalysisFrames() {
-      const frames = [{ board: createBoard(boardSize), previousBoardHash: null, positionHashes: new Set([boardHash(createBoard(boardSize))]), captures: { [BLACK]: 0, [WHITE]: 0 }, history: [] }];
+      const initialBoard = createBoard(boardSize);
+      const initialHash = boardHash(initialBoard);
+      const frames = [{
+        board: initialBoard,
+        previousBoardHash: null,
+        positionHashes: new Set([initialHash]),
+        situationalHashes: new Set([situationalHash(initialHash, BLACK)]),
+        captures: { [BLACK]: 0, [WHITE]: 0 },
+        history: [],
+      }];
       for (const move of history) {
         const prev = frames[frames.length - 1];
         const nextBoard = cloneBoard(prev.board);
         const nextHashes = new Set(prev.positionHashes);
+        const nextSituationalHashes = new Set(prev.situationalHashes || []);
         const nextCaptures = { ...prev.captures };
         let nextPreviousHash = boardHash(prev.board);
         if (!move.pass) {
@@ -1367,6 +1423,7 @@
           if (!trial.legal) break;
           if (nextPreviousHash && trial.koHash === prev.previousBoardHash) break;
           if (koRule === 'superko' && prev.positionHashes.has(trial.koHash)) break;
+          if (koRule === 'situational-superko' && nextSituationalHashes.has(situationalHash(trial.koHash, other(move.color)))) break;
           for (let y = 0; y < boardSize; y++) {
             for (let x = 0; x < boardSize; x++) {
               nextBoard[y][x] = trial.board[y][x];
@@ -1374,11 +1431,15 @@
           }
           nextCaptures[move.color] += trial.captured;
           nextHashes.add(trial.koHash);
+          nextSituationalHashes.add(situationalHash(trial.koHash, other(move.color)));
+        } else {
+          nextSituationalHashes.add(situationalHash(nextPreviousHash, other(move.color)));
         }
         frames.push({
           board: nextBoard,
           previousBoardHash: nextPreviousHash,
           positionHashes: nextHashes,
+          situationalHashes: nextSituationalHashes,
           captures: nextCaptures,
           history: [...prev.history, { ...move }],
         });
@@ -1679,6 +1740,7 @@
         lastEstimate: lastEstimate ? { ...lastEstimate } : null,
         koRule,
         positionHashes: new Set([...positionHashes]),
+        situationalHashes: new Set([...situationalHashes]),
         koRuleSelectValue: koRuleSelect.value,
       };
 
@@ -1703,6 +1765,7 @@
         previousBoardHash = null;
         lastBoardHash = boardHash(board);
         positionHashes = new Set([lastBoardHash]);
+        situationalHashes = new Set([situationalHash(lastBoardHash, currentPlayer)]);
         koRule = 'simple';
         koRuleSelect.value = 'simple';
         if (setupFn) setupFn();
@@ -1755,6 +1818,7 @@
           board[0][0] = BLACK;
           lastBoardHash = boardHash(board);
           positionHashes = new Set([lastBoardHash]);
+          situationalHashes = new Set([situationalHash(lastBoardHash, currentPlayer)]);
           koRule = 'superko';
           koRuleSelect.value = 'superko';
         }, () => {
@@ -1765,6 +1829,24 @@
             assert(!legal, 'Positional superko blocks repeated full-board position');
           } else {
             assert(false, 'Superko test setup produced legal probe move');
+          }
+        });
+
+        withBoardState(5, () => {
+          board[0][0] = BLACK;
+          lastBoardHash = boardHash(board);
+          positionHashes = new Set([lastBoardHash]);
+          situationalHashes = new Set([situationalHash(lastBoardHash, currentPlayer)]);
+          koRule = 'situational-superko';
+          koRuleSelect.value = 'situational-superko';
+        }, () => {
+          const trial = applyMoveToBoard(board, 1, 1, BLACK);
+          if (trial.legal) {
+            situationalHashes.add(situationalHash(trial.koHash, WHITE));
+            const legal = playMove(1, 1, BLACK, { silent: true });
+            assert(!legal, 'Situational superko blocks repeated board+player state');
+          } else {
+            assert(false, 'Situational superko test setup produced legal probe move');
           }
         });
 
@@ -1811,6 +1893,7 @@
         lastEstimate = snapshot.lastEstimate ? { ...snapshot.lastEstimate } : null;
         koRule = snapshot.koRule;
         positionHashes = new Set([...snapshot.positionHashes]);
+        situationalHashes = new Set([...snapshot.situationalHashes]);
         koRuleSelect.value = snapshot.koRuleSelectValue;
         renderAll();
       }
@@ -2203,6 +2286,7 @@
       previousBoardHash = null;
       lastBoardHash = boardHash(board);
       positionHashes = new Set([lastBoardHash]);
+      situationalHashes = new Set([situationalHash(lastBoardHash, currentPlayer)]);
       lastMove = null;
       passCount = 0;
       gameOver = false;
@@ -2213,7 +2297,8 @@
       clockState.paused = false;
       startClock();
       renderAll();
-      log(`New ${boardSize}×${boardSize} game started. You are ${colorName(humanColor)}. CPU set to ${activeDifficulty.label}. Rule: ${koRule === 'superko' ? 'positional superko' : 'simple ko'}.`);
+      const koLabel = koRule === 'superko' ? 'positional superko' : koRule === 'situational-superko' ? 'situational superko' : 'simple ko';
+      log(`New ${boardSize}×${boardSize} game started. You are ${colorName(humanColor)}. CPU set to ${activeDifficulty.label}. Rule: ${koLabel}.`);
       if (cpuColor === BLACK) maybeCpuTurn();
     }
 
@@ -2268,7 +2353,8 @@
     });
     koRuleSelect.addEventListener('change', () => {
       koRule = koRuleSelect.value;
-      log(`Ko rule changed to ${koRule === 'superko' ? 'positional superko' : 'simple ko'}. Start a new game to apply cleanly.`);
+      const label = koRule === 'superko' ? 'positional superko' : koRule === 'situational-superko' ? 'situational superko' : 'simple ko';
+      log(`Ko rule changed to ${label}. Start a new game to apply cleanly.`);
     });
     useWorkerToggle.addEventListener('change', () => {
       log(`CPU threading: ${useWorkerToggle.checked ? 'Worker enabled' : 'Main thread only'}.`);
@@ -2319,6 +2405,16 @@
         cpuColor: colorName(cpuColor),
         difficulty: activeDifficulty.label,
         captures,
+        koRule,
+        clock: {
+          enabled: clockState.enabled,
+          byoYomiSeconds: clockState.byoYomiSeconds,
+          byoYomiPeriods: clockState.byoYomiPeriods,
+          players: {
+            [BLACK]: { ...clockState.players[BLACK] },
+            [WHITE]: { ...clockState.players[WHITE] },
+          },
+        },
         history,
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
