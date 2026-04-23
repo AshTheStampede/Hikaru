@@ -41,3 +41,35 @@ This is a single-file browser Go app (`HTML + CSS + JS`) that provides:
 
 10. **Performance profiling + incremental render strategy.**
     Track frame/move timing and avoid full redraws where possible (dirty regions/layers) for smoother large-board interaction.
+
+## What is next (recommended sequence)
+
+### Phase 1: Stability + correctness (next 1-2 iterations)
+
+- Add a **deterministic engine test harness** first (captures, ko, suicide, two-pass endgame, and scoring regressions).
+- Refactor into **pure game-state logic vs UI/rendering** to make future changes safer.
+- Introduce **performance instrumentation** (move compute time, render frame time) to baseline current behavior.
+
+### Phase 2: Competitive-play readiness
+
+- Implement **rules completeness** (superko variants + dead-stone adjudication flow).
+- Add **SGF import/export and replay controls** for interoperability and review workflows.
+- Add **time controls** (byo-yomi/Canadian + timeout handling + metadata in records).
+
+### Phase 3: Strength + UX differentiation
+
+- Move AI search to a **Web Worker** to remove main-thread stalls.
+- Add a **pluggable stronger engine path** (MCTS or wasm bridge), keeping current AI as fallback.
+- Ship **analysis mode** (swing graph, candidate lines, explain-why hints).
+
+### Phase 4: Polish and accessibility
+
+- Improve **keyboard-first controls**, ARIA, and high-contrast/screen-reader behavior.
+- Add **incremental render updates** for smoother 19x19 interaction.
+
+## Immediate next milestone (single sprint)
+
+If only one milestone is planned next, choose: **"Rules + tests"**.
+
+- Scope: test harness + superko options + dead-stone adjudication.
+- Outcome: biggest improvement in trustworthiness and foundation for stronger AI.
